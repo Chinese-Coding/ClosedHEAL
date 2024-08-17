@@ -1,4 +1,5 @@
 name: Pyramid_m1_base
+# WARNING: 这里使用了编程语言自带的字符串插值, 这部分的处理在 `load_yaml` 函数中
 root_dir: "~/Desktop/dataset"
 train_dir: "${root_dir}/OPV2V/train"
 validate_dir: "${root_dir}/OPV2V/validate"

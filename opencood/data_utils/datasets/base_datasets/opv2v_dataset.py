@@ -5,7 +5,7 @@ from typing import List, Dict
 from torch.utils.data import Dataset
 
 from logger import get_logger
-from opencood.data_utils.datasets.dataset_models import Scenario, RetrievedData, Timestamp, Agent
+from opencood.data_utils.datasets.dataset_models import Scenario, SensorsData, Timestamp, Agent
 from opencood.data_utils.datasets.utils import load_yaml_data, load_lidar_data, load_camera_data, load_depth_data
 from opencood.utils.yaml_utils import load_yaml
 
@@ -19,9 +19,9 @@ def contractuser(path):
     :param path:
     :return:
     """
-    home_dir = os.path.expanduser('~')
+    home_dir = os.path.expanduser("~")
     if path.startswith(home_dir):
-        return path.replace(home_dir, '~', 1)
+        return path.replace(home_dir, "~", 1)
     return path
 
 
@@ -35,7 +35,7 @@ def get_sensor_files(agent_path: str, timestamp: str, sensor_type: str) -> List[
     """
     camera_files = []
     for i in range(4):  # 相机数量, 这里默认为 4, 因为在 OPV2V 数据集中就只有 4 个相机
-        camera_files.append(os.path.join(agent_path, timestamp, f'_{sensor_type}{i}.png'))
+        camera_files.append(os.path.join(agent_path, timestamp, f"_{sensor_type}{i}.png"))
     return camera_files
 
 
@@ -58,13 +58,13 @@ class OPV2VDataset(Dataset):
         self.train = train
         self.scenario_database: List[Scenario] = []  # 存储场景数据 (场景数据库)
         self.len_record: List[int] = []  # 记录数据长度, 采用了一种类似于前缀和的形式.
-        self.max_agent = configs.get('train_params', {}).get('max_cav', 5)  # 支持的最大智能体的数量
-        self.label_type = configs['label_type']
+        self.max_agent = configs.get("train_params", {}).get("max_cav", 5)  # 支持的最大智能体的数量
+        self.label_type = configs["label_type"]
 
         """需要加载哪些文件"""
-        self.load_lidar_file = True if 'lidar' in configs['input_source'] or visualize else False
-        self.load_camera_file = True if 'camera' in configs['input_source'] else False
-        self.load_depth_file = True if 'depth' in configs['input_source'] else False
+        self.load_lidar_file = True if "lidar" in configs["input_source"] or visualize else False
+        self.load_camera_file = True if "camera" in configs["input_source"] else False
+        self.load_depth_file = True if "depth" in configs["input_source"] else False
 
         # 加载数据
         train_dir = configs["train_dir"] if self.train else configs["validate_dir"]
@@ -101,17 +101,17 @@ class OPV2VDataset(Dataset):
             scenario = Scenario(scenario_name)
 
             """加载全部 agent 的数据"""
-            for (j, agent_id) in enumerate(agents_in_scenario):
+            for j, agent_id in enumerate(agents_in_scenario):
                 # 如果某个场景中 agent 大于 max_agent 个, 就不再读入多余的 agent 数据了, 并且在命令行给出提示
                 if j > self.max_agent - 1:
-                    logger.warning(
-                        f"There are too many agents in {contractuser(scenario_directory)}, max_agent: {self.max_agent}")
+                    logger.warning(f"There are too many agents in {contractuser(scenario_directory)}, max_agent: {self.max_agent}")  # fmt: skip
                     break
                 agent = Agent(agent_id)
                 agent_path = os.path.join(scenario_directory, agent_id)
                 # TODO: 这里加一个判断的意义是什么?
-                yaml_files = sorted(entry.path for entry in os.scandir(agent_path) if
-                                    entry.is_file() and entry.name.endswith(".yaml") and 'additional' not in entry.name)
+
+                yaml_files = sorted(entry.path for entry in os.scandir(agent_path)
+                                    if entry.is_file() and entry.name.endswith(".yaml") and "additional" not in entry.name)  # fmt: skip
                 # 过滤掉一个不合法的场景. TODO: 这里先去掉这一部分, 如果后续训练中有需要则加上
                 # yaml_files = [file for file in yaml_files if not ("2021_08_20_21_10_24" in file and "000265" in file)]
 
@@ -119,10 +119,11 @@ class OPV2VDataset(Dataset):
                 timestamps = extract_timestamps(yaml_files)
                 for timestamp in timestamps:
                     timestamp_data = Timestamp(
-                        timestamp=timestamp, yaml=os.path.join(agent_path, f"{timestamp}.yaml"),
+                        timestamp=timestamp,
+                        yaml=os.path.join(agent_path, f"{timestamp}.yaml"),
                         lidar=os.path.join(agent_path, f"{timestamp}.pcd"),
                         cameras=get_sensor_files(agent_path, timestamp, "camera"),
-                        depths=get_sensor_files(agent_path, timestamp, "depth")
+                        depths=get_sensor_files(agent_path, timestamp, "depth"),
                     )
 
                     if heterogeneous:
@@ -149,6 +150,9 @@ class OPV2VDataset(Dataset):
                 scenario.add_agent(agent)
             self.scenario_database.append(scenario)
 
+    def __getitem__(self, idx: int):
+        return self.retrieve_basedata(idx)
+
     def retrieve_basedata(self, idx: int):
         """
         根据 idx 的值, 获取对应的场景数据
@@ -162,24 +166,24 @@ class OPV2VDataset(Dataset):
                 break
         scenario = self.scenario_database[scenario_index]
         timestamp_index = idx if scenario_index == 0 else idx - self.len_record[scenario_index - 1]
-        return_data: Dict[str, RetrievedData] = {}
+        return_data: Dict[str, SensorsData] = {}
 
         """加载 agent 里面的数据 (从一个文件路径变为真正的数据)"""
         for agent in scenario.agents:
             timestamp = agent.timestamps[timestamp_index]
             ego = agent.ego
             yaml_data = load_yaml_data(timestamp.yaml)
-            liaar_data = load_lidar_data(timestamp.lidar) if self.load_lidar_file else None
+            lidar_data = load_lidar_data(timestamp.lidar) if self.load_lidar_file else None
             camera_data = load_camera_data(timestamp.cameras) if self.load_camera_file else None
             depth_data = load_depth_data(timestamp.depths) if self.load_depth_file else None
 
             # TODO: file_extension 没抄
-
-            return_data[agent.id] = RetrievedData(
-                id=agent.id, ego=ego, yaml_data=yaml_data,
-                lidar_data=liaar_data, camera_data=camera_data, depth_data=depth_data,
-                agent_modality=timestamp.agent_modality  # 这里没有对是否异质作出判断
+            # fmt: off
+            return_data[agent.id] = SensorsData(id=agent.id, ego=ego,
+                yaml_data=yaml_data, lidar_data=lidar_data, camera_data=camera_data, depth_data=depth_data,
+                agent_modality=timestamp.agent_modality,  # 这里没有对是否异质作出判断
             )
+            # fmt: on
 
         return return_data
 
@@ -188,7 +192,7 @@ class OPV2VDataset(Dataset):
 
 
 """测试函数 (路径均为绝对路径)"""
-if __name__ == '__main__':
+if __name__ == "__main__":
     from icecream import ic
 
     config_path = "~/PycharmProjects/ClosedHEAL/opencood/configs/OPV2V/MoreModality/HEAL/stage1/m1_pyramid.yaml"
@@ -197,4 +201,6 @@ if __name__ == '__main__':
     opv2v_dataset = OPV2VDataset(configs, False)
     opv2v_dataset.initialize()
     ic(opv2v_dataset.len_record)
-    ic(opv2v_dataset.retrieve_basedata(1))
+    data = opv2v_dataset.retrieve_basedata(0)
+    ic(len(data))
+    ic(data.keys())
