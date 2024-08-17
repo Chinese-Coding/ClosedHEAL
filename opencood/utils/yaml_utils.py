@@ -34,9 +34,16 @@ def load_yaml(file: str, model_dir=None):
             loader.add_implicit_resolver('tag:yaml.org,2002:float', re.compile(pattern, re.X), list('-+0123456789.'))
             configs = yaml.load(stream, Loader=loader)
     except FileNotFoundError:
-        logger.error(f"{file} 没有找到")
+        logger.critical(f"{file} 没有找到")
     except yaml.YAMLError as e:
-        logger.error(f"解析文件时出错: {e}")
+        logger.critical(f"解析文件时出错: {e}")
+
+    # 处理字符串插值
+    if 'root_dir' in configs:
+        root_dir = configs['root_dir']
+        configs['train_dir'] = configs['train_dir'].replace("${root_dir}", root_dir)
+        configs['validate_dir'] = configs['validate_dir'].replace("${root_dir}", root_dir)
+        configs['test_dir'] = configs['test_dir'].replace("${root_dir}", root_dir)
 
     if "yaml_parser" in configs:
         # TODO: 修改这种 `eval` 函数的写法
