@@ -1,5 +1,4 @@
-from collections import OrderedDict
-from typing import List, Mapping
+from typing import List
 
 import numpy as np
 import open3d
@@ -57,43 +56,27 @@ def load_yaml_data(yaml_file: str) -> AgentInfo:
     """创建 Camera 列表"""
     cameras = []
     for i in range(4):
-        camera = Camera(**data[f'camera{i}'])
+        camera = Camera(**data[f"camera{i}"])
         cameras.append(camera)
 
-    """创建 Vehicle 的 OrderedDict"""
-    vehicles_dict = data.get('vehicles', {})
-    vehicles = OrderedDict()
+    """创建 Vehicle 的 Dict"""
+    vehicles_dict = data.get("vehicles", {})
+    vehicles = {}
     for k, v in vehicles_dict.items():
         vehicles[k] = Vehicle(**v)
 
     # 将解析的数据封装到YamlData数据类中
+    # fmt: off
     return AgentInfo(
         cameras=cameras, ego_speed=data.get('ego_speed', 0.0),
         lidar_pose=data.get('lidar_pose', []), plan_trajectory=data.get('plan_trajectory', []),
         predicted_ego_pos=data.get('predicted_ego_pos', []), true_ego_pos=data.get('true_ego_pos', []),
         vehicles=vehicles
     )
+    # fmt
 
 
-def get_ego_info(base_data_dict: Mapping):
-    ego_id = -1
-    ego_lidar_pose = []
-
-    # first find the ego vehicle's lidar pose
-    for cav_id, cav_content in base_data_dict.items():
-        if cav_content['ego']:
-            ego_id = cav_id
-            ego_lidar_pose = cav_content['params']['lidar_pose']
-            break
-
-    assert ego_id != -1
-    assert len(ego_lidar_pose) > 0
-    return ego_id, ego_lidar_pose
-
-
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     import os
     from icecream import ic
 

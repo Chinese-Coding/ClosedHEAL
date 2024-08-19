@@ -1,11 +1,13 @@
 import os
 import random
+from functools import partial
 from typing import List, Dict
 
 from torch.utils.data import Dataset
 
 from logger import get_logger
-from opencood.data_utils.datasets.dataset_models import Scenario, SensorsData, Timestamp, Agent
+from opencood.data_utils.datasets.adaptor import Adaptor
+from opencood.data_utils.datasets.dataset_models import SensorsData, Timestamp, Agent
 from opencood.data_utils.datasets.utils import load_yaml_data, load_lidar_data, load_camera_data, load_depth_data
 from opencood.utils.globals import VISUALIZE, MODEL_MODE
 from opencood.utils.file_utils import load_yaml
@@ -42,7 +44,7 @@ def get_sensor_files(agent_path: str, timestamp: str, sensor_type: str) -> List[
 
 def extract_timestamps(yaml_files: List[str]) -> List[str]:
     """
-    根据给出的 yaml 文件的文件路径，提取出 yaml 文件名中包含的时间戳+
+    根据给出的 yaml 文件的文件路径，提取出 yaml 文件名中包含的时间戳
     :param yaml_files:
     :return:
     """
@@ -55,27 +57,27 @@ def extract_timestamps(yaml_files: List[str]) -> List[str]:
 
 
 class OPV2VDataset(Dataset):
-    def __init__(self, configs: Dict, visualize: bool, train=True):
-        self.train = train
-        self.scenario_database: List[Scenario] = []  # 存储场景数据 (场景数据库)
+    def __init__(self, configs: Dict, heterogeneous=False, adaptor=None):
+        self.scenario_database: List[List[Agent]] = []  # 存储场景数据 (场景数据库)
         self.len_record: List[int] = []  # 记录数据长度, 采用了一种类似于前缀和的形式.
         self.max_agent = configs.get("train_params", {}).get("max_cav", 5)  # 支持的最大智能体的数量
         self.label_type = configs["label_type"]
 
         """需要加载哪些文件"""
-        self.load_lidar_file = True if "lidar" in configs["input_source"] or visualize else False
+        self.load_lidar_file = True if "lidar" in configs["input_source"] or VISUALIZE else False
         self.load_camera_file = True if "camera" in configs["input_source"] else False
         self.load_depth_file = True if "depth" in configs["input_source"] else False
 
         # 加载数据
-        train_dir = configs["train_dir"] if self.train else configs["validate_dir"]
+        train_dir = configs["train_dir"] if MODEL_MODE else configs["validate_dir"]
         logger.important(f"Lode data from {train_dir}")  # 保护隐私, 先输出再对 `~` 进行解析
         train_dir = os.path.expanduser(train_dir)  # 单独命名成一个变量,
         self.scenario_directories = sorted(dir.path for dir in os.scandir(train_dir) if dir.is_dir())
 
         # TODO: add_data_extension 没有加上去
+        self.initialize = partial(self._initialize, heterogeneous=heterogeneous, adaptor=adaptor)
 
-    def initialize(self, heterogeneous=False, adaptor=None):
+    def _initialize(self, heterogeneous=False, adaptor=None):
         """
         初始化数据集, 包括 (是一个三重循环):
         1. 加载全部场景数据
@@ -84,33 +86,29 @@ class OPV2VDataset(Dataset):
         """
         """加载全部场景的数据"""
         for scenario_directory in self.scenario_directories:
-            agents_in_scenario = [agent_id.name for agent_id in os.scandir(scenario_directory) if agent_id.is_dir()]
-            if self.train:
-                random.shuffle(agents_in_scenario)  # 随机打乱 agent 的 id 号
-            else:
-                agents_in_scenario = sorted(agents_in_scenario)
-
-            if len(agents_in_scenario) <= 0:
-                raise ValueError(f"No agents in scenario {scenario_directory}")
-
+            agent_ids = [agent_id.name for agent_id in os.scandir(scenario_directory) if agent_id.is_dir()]
+            if len(agent_ids) <= 0:
+                logger.critical(f"No agents in scenario {scenario_directory}")
             scenario_name = scenario_directory.split("/")[-1]
-            # TODO: 这里有一段没抄过来
+            if MODEL_MODE:
+                random.shuffle(agent_ids)  # 随机打乱 agent 的 id 号
+            else:
+                agent_ids = sorted(agent_ids)
+                if heterogeneous:  # 仅在非训练模式且异质的情况
+                    agent_ids = adaptor.reorder_agents(agent_ids, scenario_name)
 
-            if heterogeneous:  # TODO: 如果是异质的情况, 需要进行一些处理, 具体含义还不是很清楚
-                agents_in_scenario = adaptor.reorder_agents(agents_in_scenario, scenario_name)
-
-            scenario = Scenario(scenario_name)
+            scenario_agents: List[Agent] = []
 
             """加载全部 agent 的数据"""
-            for j, agent_id in enumerate(agents_in_scenario):
+            for j, agent_id in enumerate(agent_ids):
                 # 如果某个场景中 agent 大于 max_agent 个, 就不再读入多余的 agent 数据了, 并且在命令行给出提示
                 if j > self.max_agent - 1:
                     logger.warning(f"There are too many agents in {contractuser(scenario_directory)}, max_agent: {self.max_agent}")  # fmt: skip
                     break
                 agent = Agent(agent_id)
                 agent_path = os.path.join(scenario_directory, agent_id)
-                # TODO: 这里加一个判断的意义是什么?
 
+                # TODO: 这里加一个判断的意义是什么?
                 yaml_files = sorted(entry.path for entry in os.scandir(agent_path)
                                     if entry.is_file() and entry.name.endswith(".yaml") and "additional" not in entry.name)  # fmt: skip
                 # 过滤掉一个不合法的场景. TODO: 这里先去掉这一部分, 如果后续训练中有需要则加上
@@ -120,7 +118,6 @@ class OPV2VDataset(Dataset):
                 timestamps = extract_timestamps(yaml_files)
                 for timestamp in timestamps:
                     timestamp_data = Timestamp(
-                        timestamp=timestamp,
                         yaml=os.path.join(agent_path, f"{timestamp}.yaml"),
                         lidar=os.path.join(agent_path, f"{timestamp}.pcd"),
                         cameras=get_sensor_files(agent_path, timestamp, "camera"),
@@ -128,9 +125,9 @@ class OPV2VDataset(Dataset):
                     )
 
                     if heterogeneous:
-                        agent_modality = adaptor.reassign_agent_modality(scenario_name, agent_id, j)
-                        timestamp_data.agent_modality = agent_modality
-                        timestamp_data.lidar = adaptor.switch_lidar_channels(agent_modality, timestamp_data.lidar)
+                        modality = adaptor.assign_modality(scenario_name, j == 0)
+                        timestamp_data.modality = modality
+                        timestamp_data.lidar = adaptor.switch_lidar_channels(modality, timestamp_data.lidar)
 
                     # TODO: 这里有一部分没抄, 加载多余数据
 
@@ -148,10 +145,10 @@ class OPV2VDataset(Dataset):
                         self.len_record.append(prefix_len + len(timestamps))
                 else:
                     agent.ego = False
-                scenario.add_agent(agent)
-            self.scenario_database.append(scenario)
+                scenario_agents.append(agent)
+            self.scenario_database.append(scenario_agents)
 
-    def __getitem__(self, idx: int):
+    def __getitem__(self, idx: int) -> Dict[str, SensorsData]:
         return self.retrieve_basedata(idx)
 
     def retrieve_basedata(self, idx: int):
@@ -165,12 +162,12 @@ class OPV2VDataset(Dataset):
             if idx < v:
                 scenario_index = i
                 break
-        scenario = self.scenario_database[scenario_index]
+        scenario_agents = self.scenario_database[scenario_index]
         timestamp_index = idx if scenario_index == 0 else idx - self.len_record[scenario_index - 1]
         return_data: Dict[str, SensorsData] = {}
 
         """加载 agent 里面的数据 (从一个文件路径变为真正的数据)"""
-        for agent in scenario.agents:
+        for agent in scenario_agents:
             timestamp = agent.timestamps[timestamp_index]
             ego = agent.ego
             yaml_data = load_yaml_data(timestamp.yaml)
@@ -180,9 +177,9 @@ class OPV2VDataset(Dataset):
 
             # TODO: file_extension 没抄
             # fmt: off
-            return_data[agent.id] = SensorsData(id=agent.id, ego=ego,
-                yaml_data=yaml_data, lidar_data=lidar_data, camera_data=camera_data, depth_data=depth_data,
-                agent_modality=timestamp.agent_modality,  # 这里没有对是否异质作出判断
+            return_data[agent.id] = SensorsData(
+                ego=ego,modality=timestamp.modality,
+                yaml_data=yaml_data, lidar_data=lidar_data, camera_data=camera_data, depth_data=depth_data
             )
             # fmt: on
 
@@ -199,7 +196,8 @@ if __name__ == "__main__":
     config_path = "~/PycharmProjects/ClosedHEAL/opencood/configs/OPV2V/MoreModality/HEAL/stage1/m1_pyramid.yaml"
     config_path = os.path.expanduser(config_path)
     configs = load_yaml(config_path)
-    opv2v_dataset = OPV2VDataset(configs, False)
+    adaptor = Adaptor(configs["heter"])
+    opv2v_dataset = OPV2VDataset(configs, True, adaptor)
     opv2v_dataset.initialize()
     ic(opv2v_dataset.len_record)
     data = opv2v_dataset.retrieve_basedata(0)
