@@ -3,7 +3,7 @@ import sys
 
 from icecream import ic
 
-from opencood.utils.yaml_utils import load_yaml
+from opencood.utils.file_utils import load_yaml
 
 
 

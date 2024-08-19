@@ -69,7 +69,7 @@ def create_noise_generator(noise_setting: Dict):
 if __name__ == "__main__":
     from icecream import ic
     import os
-    from opencood.utils.yaml_utils import load_yaml
+    from opencood.utils.file_utils import load_yaml
     from opencood.data_utils.datasets.base_datasets.opv2v_dataset import OPV2VDataset
 
     config_path = "~/PycharmProjects/ClosedHEAL/opencood/configs/OPV2V/MoreModality/HEAL/stage1/m1_pyramid.yaml"

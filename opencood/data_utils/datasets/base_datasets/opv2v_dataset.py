@@ -7,7 +7,8 @@ from torch.utils.data import Dataset
 from logger import get_logger
 from opencood.data_utils.datasets.dataset_models import Scenario, SensorsData, Timestamp, Agent
 from opencood.data_utils.datasets.utils import load_yaml_data, load_lidar_data, load_camera_data, load_depth_data
-from opencood.utils.yaml_utils import load_yaml
+from opencood.utils.globals import VISUALIZE, MODEL_MODE
+from opencood.utils.file_utils import load_yaml
 
 logger = get_logger()
 

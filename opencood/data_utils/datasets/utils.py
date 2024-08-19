@@ -6,7 +6,7 @@ import open3d
 from PIL import Image
 
 from opencood.data_utils.datasets.dataset_models import AgentInfo, Camera, Vehicle
-from opencood.utils.yaml_utils import load_yaml
+from opencood.utils.file_utils import load_yaml
 
 
 def load_camera_data(camera_files: List[str], preload=True) -> List[Image]:
