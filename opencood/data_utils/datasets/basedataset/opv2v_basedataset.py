@@ -5,7 +5,6 @@
 import json
 import os
 import random
-from collections import OrderedDict
 from pathlib import Path
 
 import cv2
@@ -35,6 +34,24 @@ def _GetTimestampDataPath(cavPath, timestamp):
     depth_files = [Path(cavPath) / f"{timestamp}_depth{i}.png" for i in range(4)]
     depth_files = [depth_file.replace("OPV2V", "OPV2V_Hetero") for depth_file in depth_files]
     return yaml_file, lidar_file, camera_files, depth_files
+
+
+def _LoadParams(yamlFile):
+    """Load params from either JSON or YAML. (json is faster than yaml)"""
+    json_file = yamlFile.replace("yaml", "json")
+    if os.path.exists(json_file):
+        with open(json_file, "r") as f:
+            return json.load(f)
+    return load_yaml(yamlFile)
+
+
+def _ReplaceWithAdditional(filePath: str):
+    """Replace the main folder with 'additional' if file is not found."""
+    return Path(filePath).with_name(
+        filePath.replace("train", "additional/train")
+        .replace("validate", "additional/validate")
+        .replace("test", "additional/test")
+    )
 
 
 class OPV2VBaseDataset(Dataset):
@@ -180,6 +197,33 @@ class OPV2VBaseDataset(Dataset):
                     self.scenario_database[i][cav_id]["ego"] = False
         print("len:", self.len_record[-1])
 
+    def _GetScenarioIndex(self, idx):
+        """Find the correct scenario index based on idx."""
+        for i, ele in enumerate(self.len_record):
+            if idx < ele:
+                return i
+        return 0
+
+    def _LoadCameraAndDepth(self, cavContent, timestampKey):
+        """Load camera and depth data. (hdf5 is faster than png)"""
+        cameraData, depthData = [], []
+        hdf5_file = cavContent[timestampKey]["cameras"][0].replace("camera0.png", "imgs.hdf5")
+        # TODO: 也许我应该试着把图片和深度信息转换成对应的 hdf5 格式
+        if self.use_hdf5 and os.path.exists(hdf5_file):
+            with h5py.File(hdf5_file, "r") as hdf5File:
+                for i in range(4):
+                    if self.load_camera_file:
+                        cameraData.append(Image.fromarray(hdf5File[f"camera{i}"][()]))
+                    if self.load_depth_file:
+                        depthData.append(Image.fromarray(hdf5File[f"depth{i}"][()]))
+        else:  # 实际真正用到的只有这部分, 不会用到 hdf5 文件的
+            if self.load_camera_file:
+                cameraData = load_camera_data(cavContent[timestampKey]["cameras"])
+            if self.load_depth_file:
+                depthData = load_camera_data(cavContent[timestampKey]["depths"])
+
+        return {"camera_data": cameraData, "depth_data": depthData}
+
     def retrieve_base_data(self, idx):
         """
         Given the index, return the corresponding data.
@@ -196,48 +240,20 @@ class OPV2VBaseDataset(Dataset):
             each cav.
         """
         # we loop the accumulated length list to see get the scenario index
-        scenario_index = 0
-        for i, ele in enumerate(self.len_record):
-            if idx < ele:
-                scenario_index = i
-                break
+        scenario_index = self._GetScenarioIndex(idx)
         scenario_database = self.scenario_database[scenario_index]
 
         # check the timestamp index
         timestamp_index = idx if scenario_index == 0 else idx - self.len_record[scenario_index - 1]
         # retrieve the corresponding timestamp key
-        timestamp_key = self.return_timestamp_key(scenario_database, timestamp_index)
-        data = OrderedDict()
+        # 来自GPT, 经过 GPT 优化后的代码, 可能可读性上不是很好 (TODO: 为这一行代码增加一些注释)
+        timestamp_key = list(next(iter(scenario_database.values())).items())[timestamp_index][0]
+        data = {}
         # load files for all CAVs
         for cav_id, cav_content in scenario_database.items():
-            data[cav_id] = OrderedDict()
-            data[cav_id]["ego"] = cav_content["ego"]
-
-            # load param file: json is faster than yaml
-            json_file = cav_content[timestamp_key]["yaml"].replace("yaml", "json")
-            if os.path.exists(json_file):
-                with open(json_file, "r") as f:
-                    data[cav_id]["params"] = json.load(f)
-            else:
-                data[cav_id]["params"] = load_yaml(cav_content[timestamp_key]["yaml"])
-
-            # load camera file: hdf5 is faster than png
-            hdf5_file = cav_content[timestamp_key]["cameras"][0].replace("camera0.png", "imgs.hdf5")
-
-            if self.use_hdf5 and os.path.exists(hdf5_file):
-                with h5py.File(hdf5_file, "r") as f:
-                    data[cav_id]["camera_data"] = []
-                    data[cav_id]["depth_data"] = []
-                    for i in range(4):
-                        if self.load_camera_file:
-                            data[cav_id]["camera_data"].append(Image.fromarray(f[f"camera{i}"][()]))
-                        if self.load_depth_file:
-                            data[cav_id]["depth_data"].append(Image.fromarray(f[f"depth{i}"][()]))
-            else:
-                if self.load_camera_file:
-                    data[cav_id]["camera_data"] = load_camera_data(cav_content[timestamp_key]["cameras"])
-                if self.load_depth_file:
-                    data[cav_id]["depth_data"] = load_camera_data(cav_content[timestamp_key]["depths"])
+            cavData = {"ego": cav_content["ego"]}
+            cavData["params"] = _LoadParams(cav_content[timestamp_key]["yaml"])
+            cavData.update(self._LoadCameraAndDepth(cav_content, timestamp_key))
 
             # load lidar file
             if self.load_lidar_file or self.visualize:
@@ -249,21 +265,11 @@ class OPV2VBaseDataset(Dataset):
             for file_extension in self.add_data_extension:
                 # if not find in the current directory
                 # go to additional folder
-                if not os.path.exists(cav_content[timestamp_key][file_extension]):
-                    cav_content[timestamp_key][file_extension] = cav_content[timestamp_key][file_extension].replace(
-                        "train", "additional/train"
-                    )
-                    cav_content[timestamp_key][file_extension] = cav_content[timestamp_key][file_extension].replace(
-                        "validate", "additional/validate"
-                    )
-                    cav_content[timestamp_key][file_extension] = cav_content[timestamp_key][file_extension].replace(
-                        "test", "additional/test"
-                    )
+                filePath = cav_content[timestamp_key][file_extension]
+                if not os.path.exists(filePath):
+                    filePath = _ReplaceWithAdditional(filePath)
 
-                if ".yaml" in file_extension:
-                    data[cav_id][file_extension] = load_yaml(cav_content[timestamp_key][file_extension])
-                else:
-                    data[cav_id][file_extension] = cv2.imread(cav_content[timestamp_key][file_extension])
+                data[cav_id][file_extension] = load_yaml(filePath) if ".yaml" in file_extension else cv2.imread(filePath)
 
         return data
 
@@ -275,32 +281,6 @@ class OPV2VBaseDataset(Dataset):
         Abstract method, needs to be define by the children class.
         """
         pass
-
-    @staticmethod
-    def return_timestamp_key(scenario_database, timestamp_index):
-        """
-        Given the timestamp index, return the correct timestamp key, e.g.
-        2 --> '000078'.
-
-        Parameters
-        ----------
-        scenario_database : OrderedDict
-            The dictionary contains all contents in the current scenario.
-
-        timestamp_index : int
-            The index for timestamp.
-
-        Returns
-        -------
-        timestamp_key : str
-            The timestamp key saved in the cav dictionary.
-        """
-        # get all timestamp keys
-        timestamp_keys = list(scenario_database.items())[0][1]
-        # retrieve the correct index
-        timestamp_key = list(timestamp_keys.items())[timestamp_index][0]
-
-        return timestamp_key
 
     def augment(self, lidar_np, object_bbx_center, object_bbx_mask):
         """
@@ -386,6 +366,7 @@ class OPV2VBaseDataset(Dataset):
         return self.post_processor.generate_visible_object_center(cav_contents, reference_lidar_pose)
 
     def get_ext_int(self, params, camera_id):
+        """该函数可能会被其他类调用, 所以不可能为静态的"""
         camera_coords = np.array(params["camera%d" % camera_id]["cords"]).astype(np.float32)
         camera_to_lidar = x1_to_x2(camera_coords, params["lidar_pose_clean"]).astype(np.float32)  # T_LiDAR_camera
         camera_to_lidar = camera_to_lidar @ np.array(
