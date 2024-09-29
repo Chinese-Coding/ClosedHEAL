@@ -22,6 +22,21 @@ from opencood.utils.transformation_utils import x1_to_x2
 from torch.utils.data import Dataset
 
 
+def _GetTimestampDataPath(cavPath, timestamp):
+    """
+    获取某一时间戳下数据的路径
+
+    :param cavPath 汽车所在路径
+    :param timestamp 时间戳
+    """
+    yaml_file = os.path.join(cavPath, timestamp + ".yaml")
+    lidar_file = os.path.join(cavPath, timestamp + ".pcd")
+    camera_files = [Path(cavPath) / f"{timestamp}_camera{i}.png" for i in range(4)]
+    depth_files = [Path(cavPath) / f"{timestamp}_depth{i}.png" for i in range(4)]
+    depth_files = [depth_file.replace("OPV2V", "OPV2V_Hetero") for depth_file in depth_files]
+    return yaml_file, lidar_file, camera_files, depth_files
+
+
 class OPV2VBaseDataset(Dataset):
     def __init__(self, params, visualize, train=True):
         self.params = params
@@ -82,20 +97,17 @@ class OPV2VBaseDataset(Dataset):
     def reinitialize(self):
         # Structure: {scenario_id : {cav_1 : {timestamp1 : {yaml: path,
         # lidar: path, cameras:list of path}}}}
-        self.scenario_database = OrderedDict()
+        self.scenario_database = {}
         self.len_record = []
 
         # loop over all scenarios
         for i, scenario_folder in enumerate(self.scenario_folders):
-            self.scenario_database.update({i: OrderedDict()})
+            self.scenario_database.update({i: {}})
 
             # at least 1 cav should show up
-            if self.train:
-                cav_list = [x for x in os.listdir(scenario_folder) if os.path.isdir(os.path.join(scenario_folder, x))]
-                # cav_list = sorted(cav_list)
-                random.shuffle(cav_list)
-            else:
-                cav_list = sorted([x for x in os.listdir(scenario_folder) if os.path.isdir(os.path.join(scenario_folder, x))])
+            # 用三元运算符来简化判断 (使用 sample 函数代替原先的 shuffle 函数, 因为sample函数有返回值写起来比较统一, 不知道应不影响性能)
+            cav_list = [cav.name for cav in Path(scenario_folder).iterdir() if cav.is_dir()]
+            cav_list = random.sample(cav_list, len(cav_list)) if self.train else sorted(cav_list)
             assert len(cav_list) > 0
 
             """
@@ -118,42 +130,35 @@ class OPV2VBaseDataset(Dataset):
                 if j > self.max_cav - 1:
                     print("too many cavs reinitialize")
                     break
-                self.scenario_database[i][cav_id] = OrderedDict()
+                self.scenario_database[i][cav_id] = {}
 
                 # save all yaml files to the dictionary
                 cav_path = os.path.join(scenario_folder, cav_id)
 
-                yaml_files = sorted(
-                    [os.path.join(cav_path, x) for x in os.listdir(cav_path) if x.endswith(".yaml") and "additional" not in x]
-                )
+                yaml_files = sorted([str(file) for file in Path(cav_path).glob("*.yaml") if "additional" not in file.stem])
 
                 # this timestamp is not ready
                 yaml_files = [x for x in yaml_files if not ("2021_08_20_21_10_24" in x and "000265" in x)]
 
-                timestamps = self.extract_timestamps(yaml_files)
+                timestamps = [Path(file).stem for file in yaml_files]  # 来自GPT: 把提取 timestamp 函数删掉了 (一行代码完事)
 
                 for timestamp in timestamps:
-                    self.scenario_database[i][cav_id][timestamp] = OrderedDict()
-                    yaml_file = os.path.join(cav_path, timestamp + ".yaml")
-                    lidar_file = os.path.join(cav_path, timestamp + ".pcd")
-                    camera_files = self.find_camera_files(cav_path, timestamp)
-                    depth_files = self.find_camera_files(cav_path, timestamp, sensor="depth")
-                    depth_files = [depth_file.replace("OPV2V", "OPV2V_Hetero") for depth_file in depth_files]
-
-                    self.scenario_database[i][cav_id][timestamp]["yaml"] = yaml_file
-                    self.scenario_database[i][cav_id][timestamp]["lidar"] = lidar_file
-                    self.scenario_database[i][cav_id][timestamp]["cameras"] = camera_files
-                    self.scenario_database[i][cav_id][timestamp]["depths"] = depth_files
+                    # 将加载数据路径的函数, 移到了一个单独的函数中 (如果因为后面的代码还需要 `lidar_file` 我一定会让 `_GetTimestampDataPath` 函数返回一个字典)
+                    yaml_file, lidar_file, camera_files, depth_files = _GetTimestampDataPath(cav_path, timestamp)
+                    self.scenario_database[i][cav_id][timestamp] = {
+                        "yaml": yaml_file,
+                        "lidar": lidar_file,
+                        "cameras": camera_files,
+                        "depths": depth_files,
+                    }
 
                     if getattr(self, "heterogeneous", False):
                         scenario_name = scenario_folder.split("/")[-1]
 
                         cav_modality = self.adaptor.reassign_cav_modality(self.modality_assignment[scenario_name][cav_id], j)
 
-                        self.scenario_database[i][cav_id][timestamp]["modality_name"] = cav_modality
-
-                        self.scenario_database[i][cav_id][timestamp]["lidar"] = self.adaptor.switch_lidar_channels(
-                            cav_modality, lidar_file
+                        self.scenario_database[i][cav_id][timestamp].update(
+                            {"modality": cav_modality, "lidar": self.adaptor.switch_lidar_channels(cav_modality, lidar_file)}
                         )
 
                     # load extra data
@@ -168,11 +173,9 @@ class OPV2VBaseDataset(Dataset):
                 if j == 0:
                     # we regard the agent with the minimum id as the ego
                     self.scenario_database[i][cav_id]["ego"] = True
-                    if not self.len_record:
-                        self.len_record.append(len(timestamps))
-                    else:
-                        prev_last = self.len_record[-1]
-                        self.len_record.append(prev_last + len(timestamps))
+                    # 来自GPT: 延迟计算 len_record： 在更新 len_record 时，可以直接将长度累加计算合并到一次操作中，减少冗余代码
+                    total_len = self.len_record[-1] if self.len_record else 0
+                    self.len_record.append(total_len + len(timestamps))
                 else:
                     self.scenario_database[i][cav_id]["ego"] = False
         print("len:", self.len_record[-1])
@@ -274,31 +277,6 @@ class OPV2VBaseDataset(Dataset):
         pass
 
     @staticmethod
-    def extract_timestamps(yaml_files):
-        """
-        Given the list of the yaml files, extract the mocked timestamps.
-
-        Parameters
-        ----------
-        yaml_files : list
-            The full path of all yaml files of ego vehicle
-
-        Returns
-        -------
-        timestamps : list
-            The list containing timestamps only.
-        """
-        timestamps = []
-
-        for file in yaml_files:
-            res = file.split("/")[-1]
-
-            timestamp = res.replace(".yaml", "")
-            timestamps.append(timestamp)
-
-        return timestamps
-
-    @staticmethod
     def return_timestamp_key(scenario_database, timestamp_index):
         """
         Given the timestamp index, return the correct timestamp key, e.g.
@@ -323,33 +301,6 @@ class OPV2VBaseDataset(Dataset):
         timestamp_key = list(timestamp_keys.items())[timestamp_index][0]
 
         return timestamp_key
-
-    @staticmethod
-    def find_camera_files(cav_path, timestamp, sensor="camera"):
-        """
-        Retrieve the paths to all camera files.
-
-        Parameters
-        ----------
-        cav_path : str
-            The full file path of current cav.
-
-        timestamp : str
-            Current timestamp
-
-        sensor : str
-            "camera" or "depth"
-
-        Returns
-        -------
-        camera_files : list
-            The list containing all camera png file paths.
-        """
-        camera0_file = os.path.join(cav_path, timestamp + f"_{sensor}0.png")
-        camera1_file = os.path.join(cav_path, timestamp + f"_{sensor}1.png")
-        camera2_file = os.path.join(cav_path, timestamp + f"_{sensor}2.png")
-        camera3_file = os.path.join(cav_path, timestamp + f"_{sensor}3.png")
-        return [camera0_file, camera1_file, camera2_file, camera3_file]
 
     def augment(self, lidar_np, object_bbx_center, object_bbx_mask):
         """
