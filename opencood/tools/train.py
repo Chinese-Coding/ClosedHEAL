@@ -44,7 +44,7 @@ def main():
                               num_workers=4,
                               collate_fn=opencood_train_dataset.collate_batch_train,
                               shuffle=True,
-                              pin_memory=True,
+                              pin_memory=False, # 这里先改成 False, 先跑起来再说
                               drop_last=True,
                               prefetch_factor=2)
     val_loader = DataLoader(opencood_validate_dataset,
@@ -52,7 +52,7 @@ def main():
                             num_workers=4,
                             collate_fn=opencood_train_dataset.collate_batch_train,
                             shuffle=True,
-                            pin_memory=True,
+                            pin_memory=False, # 这里先改成 False, 先跑起来再说
                             drop_last=True,
                             prefetch_factor=2)
 

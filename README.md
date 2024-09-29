@@ -283,3 +283,28 @@ booktitle={The Twelfth International Conference on Learning Representations},
 year={2024},
 }
 ```
+
+# 修改原则
+1. 尽可能表明修改的目的以及来源 (例如使用 `#来自 GPT`)
+2. 使用包括但不限于 `#TODO: `, `#WARNING: `, `#FIXME: `等特殊标记, 方便后续查找
+3. 使用类似 C# 语言打命名风格, 做到与源代码的区分
+4. 每次修改都需要经过测试, 没测试不能上传到 github 上
+5. 尽可能写清楚写详细每次 git commit 的描述
+6. 写出修改目的后, 再写上修改的代码, 删掉原来的代码
+7. 在修改过程中为变量添加好类型信息
+8. 是否可以将一些代码使用 cython 重写 (也许会提高运行效率, 也许不会, 用在加载数据集里会比较好用吧)
+
+# 目前的修改方向
+1. 根据GPT提出的建议, 修改代码, 以优化性能和可读性
+2. 将原先一堆放在字典里的传递的参数, 提取出来放到 dataclass 中
+3. 优化代码结构, 将具有明显分段的代码块, 提取出来, 并且使用更明确的命名 (封装到函数里面)
+4. 将原代码中过度使用的 python 的特殊方法 (会让 idea 失去提示的特殊方法) 换成其他写法
+
+# 修改的进度
+1. 每天晚上 "下班" 后写一点
+
+# 一些调试指令
+```bash
+CUDA_LAUNCH_BLOCKING=1 python opencood/tools/train.py -y None --model_dir opencood/logs/HEAL_m1_based/stage1/m1_base
+CUDA_LAUNCH_BLOCKING=1 TORCH_USE_CUDA_DSA python opencood/tools/train.py -y None --model_dir opencood/logs/HEAL_m1_based/stage1/m1_base
+```
