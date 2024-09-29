@@ -6,6 +6,7 @@ import json
 import os
 import random
 from collections import OrderedDict
+from pathlib import Path
 
 import cv2
 import h5py
@@ -43,14 +44,13 @@ class OPV2VBaseDataset(Dataset):
 
         print("Dataset dir:", root_dir)
 
-        if "train_params" not in params or "max_cav" not in params["train_params"]:
-            self.max_cav = 5
-        else:
-            self.max_cav = params["train_params"]["max_cav"]
+        # 来自GPT: 冗余的默认值处理
+        self.max_cav = params.get("train_params", {}).get("max_cav", 5)
 
-        self.load_lidar_file = True if "lidar" in params["input_source"] or self.visualize else False
-        self.load_camera_file = True if "camera" in params["input_source"] else False
-        self.load_depth_file = True if "depth" in params["input_source"] else False
+        # 来自 GPT, 条件判断的简化
+        self.load_lidar_file = "lidar" in params["input_source"] or self.visualize
+        self.load_camera_file = "camera" in params["input_source"]
+        self.load_depth_file = "depth" in params["input_source"]
 
         self.label_type = params["label_type"]  # 'lidar' or 'camera'
         self.generate_object_center = (
@@ -68,15 +68,15 @@ class OPV2VBaseDataset(Dataset):
         self.add_data_extension = params["add_data_extension"] if "add_data_extension" in params else []
 
         if "noise_setting" not in self.params:
-            self.params["noise_setting"] = OrderedDict()
+            # 来自GPT: 如果不需要特定顺序, 建议使用普通字典 `{}`, 因为自 python3.7 开始, 普通字典就已经是有序的了.
+            # WARNING: 本文件中所有使用 OrderedDict 的地方, 均被替换为 `{}`
+            self.params["noise_setting"] = {}
             self.params["noise_setting"]["add_noise"] = False
 
         # first load all paths of different scenarios
-        scenario_folders = sorted(
-            [os.path.join(root_dir, x) for x in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, x))]
-        )
+        # 来自GPT: 路径处理的优化
+        self.scenario_folders = sorted([folder for folder in Path(root_dir).iterdir() if folder.is_dir()])
 
-        self.scenario_folders = scenario_folders
         self.reinitialize()
 
     def reinitialize(self):
