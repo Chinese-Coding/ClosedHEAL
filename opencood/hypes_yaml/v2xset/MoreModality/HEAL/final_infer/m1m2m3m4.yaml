@@ -1,4 +1,4 @@
-name: HEAL_v2xset_Pyramid_m1_base 
+name: HEAL_v2xset_Pyramid_m1_base
 root_dir: "dataset/V2XSET/train"
 validate_dir: "dataset/V2XSET/validate"
 test_dir: "dataset/V2XSET/test"
@@ -12,13 +12,13 @@ train_params:
   max_cav: 5
 
 comm_range: 70
-input_source: ['lidar', 'camera']
+input_source: [ 'lidar', 'camera' ]
 label_type: 'lidar'
-cav_lidar_range: &cav_lidar [-102.4, -51.2, -3, 102.4, 51.2, 1]
+cav_lidar_range: &cav_lidar [ -102.4, -51.2, -3, 102.4, 51.2, 1 ]
 
 
 heter:
-  assignment_path: "opencood/logs/heter_modality_assign/v2xset_4modality.json" 
+  assignment_path: "opencood/logs/heter_modality_assign/v2xset_4modality.json"
   ego_modality: &ego_modality "m1&m2&m3&m4"
   mapping_dict:
     m1: m1
@@ -35,7 +35,7 @@ heter:
         # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
         core_method: 'SpVoxelPreprocessor'
         args:
-          voxel_size: &voxel_size [0.4, 0.4, 4]
+          voxel_size: &voxel_size [ 0.4, 0.4, 4 ]
           max_points_per_voxel: 32
           max_voxel_train: 32000
           max_voxel_test: 70000
@@ -47,20 +47,20 @@ heter:
       core_method: &core_method_m2 "lift_splat_shoot"
 
       grid_conf: &grid_conf_m2
-        xbound: [-51.2, 51.2, 0.4]   # 限制x方向的范围并划分网格
-        ybound: [-51.2, 51.2, 0.4]   # 限制y方向的范围并划分网格
-        zbound: [-10, 10, 20.0]   # 限制z方向的范围并划分网格
-        ddiscr: [2, 50, 48]
+        xbound: [ -51.2, 51.2, 0.4 ]   # 限制x方向的范围并划分网格
+        ybound: [ -51.2, 51.2, 0.4 ]   # 限制y方向的范围并划分网格
+        zbound: [ -10, 10, 20.0 ]   # 限制z方向的范围并划分网格
+        ddiscr: [ 2, 50, 48 ]
         mode: 'LID'
       data_aug_conf: &data_aug_conf_m2
-        resize_lim: [0.65, 0.7]
-        final_dim: [384, 512]
-        rot_lim: [-3.6, 3.6]
+        resize_lim: [ 0.65, 0.7 ]
+        final_dim: [ 384, 512 ]
+        rot_lim: [ -3.6, 3.6 ]
         H: 600
         W: 800
         rand_flip: False
-        bot_pct_lim: [0.0, 0.05]
-        cams: ['camera0', 'camera1', 'camera2', 'camera3']
+        bot_pct_lim: [ 0.0, 0.05 ]
+        cams: [ 'camera0', 'camera1', 'camera2', 'camera3' ]
         Ncams: 4
 
     m3:
@@ -72,7 +72,7 @@ heter:
         # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
         core_method: 'SpVoxelPreprocessor'
         args:
-          voxel_size: &voxel_size_m3 [0.1, 0.1, 0.1]
+          voxel_size: &voxel_size_m3 [ 0.1, 0.1, 0.1 ]
           max_points_per_voxel: 5
           max_voxel_train: 32000
           max_voxel_test: 70000
@@ -84,26 +84,26 @@ heter:
       core_method: &core_method_m4 "lift_splat_shoot"
 
       grid_conf: &grid_conf_m4
-        xbound: [-51.2, 51.2, 0.4]   # 限制x方向的范围并划分网格
-        ybound: [-51.2, 51.2, 0.4]   # 限制y方向的范围并划分网格
-        zbound: [-10, 10, 20.0]   # 限制z方向的范围并划分网格
-        ddiscr: [2, 50, 48]
+        xbound: [ -51.2, 51.2, 0.4 ]   # 限制x方向的范围并划分网格
+        ybound: [ -51.2, 51.2, 0.4 ]   # 限制y方向的范围并划分网格
+        zbound: [ -10, 10, 20.0 ]   # 限制z方向的范围并划分网格
+        ddiscr: [ 2, 50, 48 ]
         mode: 'LID'
       data_aug_conf: &data_aug_conf_m4
-        resize_lim: [0.56, 0.61]
-        final_dim: [336, 448]
-        rot_lim: [-3.6, 3.6]
+        resize_lim: [ 0.56, 0.61 ]
+        final_dim: [ 336, 448 ]
+        rot_lim: [ -3.6, 3.6 ]
         H: 600
         W: 800
         rand_flip: False
-        bot_pct_lim: [0.0, 0.05]
-        cams: ['camera0', 'camera1', 'camera2', 'camera3']
+        bot_pct_lim: [ 0.0, 0.05 ]
+        cams: [ 'camera0', 'camera1', 'camera2', 'camera3' ]
         Ncams: 4
 
 fusion:
   core_method: 'intermediateheter'
   dataset: 'v2xset'
-  args: 
+  args:
     proj_first: false
     grid_conf: None # place-holder
     data_aug_conf: None # place-holder
@@ -113,7 +113,7 @@ preprocess:
   # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
   core_method: 'SpVoxelPreprocessor'
   args:
-    voxel_size: [0.4, 0.4, 4] # useful
+    voxel_size: [ 0.4, 0.4, 4 ] # useful
     max_points_per_voxel: 1 # useless
     max_voxel_train: 1 # useless
     max_voxel_test: 1 # useless
@@ -131,7 +131,7 @@ postprocess:
     l: 3.9
     w: 1.6
     h: 1.56
-    r: &anchor_yaw [0, 90]
+    r: &anchor_yaw [ 0, 90 ]
     feature_stride: 2
     num: &anchor_num 2
   target_args:
@@ -165,15 +165,15 @@ model:
           use_norm: true
           with_distance: false
           use_absolute_xyz: true
-          num_filters: [64]
+          num_filters: [ 64 ]
         point_pillar_scatter:
           num_features: 64
 
       backbone_args:
-        layer_nums: [3]
-        layer_strides: [2]
-        num_filters: [64]
-  
+        layer_nums: [ 3 ]
+        layer_strides: [ 2 ]
+        num_filters: [ 64 ]
+
       aligner_args:
         core_method: identity
 
@@ -196,9 +196,9 @@ model:
         grid_conf: *grid_conf_m2
 
       backbone_args:
-        layer_nums: [3]
-        layer_strides: [2]
-        num_filters: [64]
+        layer_nums: [ 3 ]
+        layer_strides: [ 2 ]
+        num_filters: [ 64 ]
         inplanes: 128
 
       aligner_args:
@@ -224,11 +224,11 @@ model:
           feature_num: 128
 
       backbone_args:
-        layer_nums: [3]
-        layer_strides: [1]
-        num_filters: [64]
+        layer_nums: [ 3 ]
+        layer_strides: [ 1 ]
+        num_filters: [ 64 ]
         inplanes: 128
-  
+
       aligner_args:
         core_method: convnext
         spatial_align: false
@@ -255,11 +255,11 @@ model:
         grid_conf: *grid_conf_m4
 
       backbone_args:
-        layer_nums: [3]
-        layer_strides: [2]
-        num_filters: [64]
+        layer_nums: [ 3 ]
+        layer_strides: [ 2 ]
+        num_filters: [ 64 ]
         inplanes: 128
-  
+
       aligner_args:
         core_method: convnext
         spatial_align: false
@@ -268,16 +268,16 @@ model:
           dim: 64
 
 
-    fusion_backbone: 
+    fusion_backbone:
       resnext: true
-      layer_nums: [3, 5, 8]
-      layer_strides: [1, 2, 2]
-      num_filters: [64, 128, 256]
-      upsample_strides: [1, 2, 4]
-      num_upsample_filter: [128, 128, 128]
+      layer_nums: [ 3, 5, 8 ]
+      layer_strides: [ 1, 2, 2 ]
+      num_filters: [ 64, 128, 256 ]
+      upsample_strides: [ 1, 2, 4 ]
+      num_upsample_filter: [ 128, 128, 128 ]
       anchor_number: *anchor_num
 
-    shrink_header: 
+    shrink_header:
       kernal_size: [ 3 ]
       stride: [ 1 ]
       padding: [ 1 ]
@@ -310,8 +310,8 @@ loss:
     depth:
       weight: 1.0
     pyramid:
-      relative_downsample: [1, 2, 4]
-      weight: [0.4, 0.2, 0.1]
+      relative_downsample: [ 1, 2, 4 ]
+      weight: [ 0.4, 0.2, 0.1 ]
 
 
 optimizer:
@@ -324,5 +324,5 @@ optimizer:
 lr_scheduler:
   core_method: multistep #step, multistep and Exponential support
   gamma: 0.1
-  step_size: [15, 25]
+  step_size: [ 15, 25 ]
 

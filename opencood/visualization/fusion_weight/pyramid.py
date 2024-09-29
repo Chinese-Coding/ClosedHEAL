@@ -1,15 +1,17 @@
-import torch
-from opencood.tools.heal_tools import get_model_path_from_dir
 import numpy as np
+import seaborn as sns
+import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt
-import seaborn as sns
+
+from opencood.tools.heal_tools import get_model_path_from_dir
+
 
 def kernel_cosine_similarity(weight1, weight2):
     """
     weight: [C_out, C_int, kernel_H, kernel_W]
     """
-    
+
     cos = nn.CosineSimilarity(dim=1, eps=1e-6)
     result = cos(weight1, weight2)
     return torch.mean(result)
@@ -35,13 +37,9 @@ if __name__ == "__main__":
         "dir_head.weight",
     ]
 
-    state_dict_list = [torch.load(get_model_path_from_dir(model), map_location='cpu') for model in models]
+    state_dict_list = [torch.load(get_model_path_from_dir(model), map_location="cpu") for model in models]
     for param_name in param_names:
-        label_dict = {
-            i: model.split("/")[-1].split("_base")[0]
-            for (i, model) in enumerate(models)
-        }
-        
+        label_dict = {i: model.split("/")[-1].split("_base")[0] for (i, model) in enumerate(models)}
 
         M = len(models)
         labels = [label_dict[idx] for idx in range(M)]
@@ -51,9 +49,7 @@ if __name__ == "__main__":
             for j in range(M):
                 if i == j:
                     continue
-                dist = 1 - kernel_cosine_similarity(
-                    state_dict_list[i][param_name], state_dict_list[j][param_name]
-                )
+                dist = 1 - kernel_cosine_similarity(state_dict_list[i][param_name], state_dict_list[j][param_name])
                 print(dist)
                 distance_matrix[i, j] = dist
 
@@ -68,6 +64,4 @@ if __name__ == "__main__":
             yticklabels=labels,
         )
         plt.tight_layout()
-        plt.savefig(
-            f"/GPFS/rhome/yifanlu/workspace/OpenCOODv2/opencood/logs_HEAL/vislog/weight_similarity/{param_name}.png"
-        )
+        plt.savefig(f"/GPFS/rhome/yifanlu/workspace/OpenCOODv2/opencood/logs_HEAL/vislog/weight_similarity/{param_name}.png")

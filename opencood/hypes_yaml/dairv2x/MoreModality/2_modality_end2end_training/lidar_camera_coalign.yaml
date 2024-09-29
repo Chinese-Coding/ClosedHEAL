@@ -13,9 +13,9 @@ train_params:
   max_cav: 2
 
 comm_range: 100
-input_source: ['lidar', 'camera']
+input_source: [ 'lidar', 'camera' ]
 label_type: 'lidar'
-cav_lidar_range: &cav_lidar [-102.4, -51.2, -3.5, 102.4, 51.2, 1.5]
+cav_lidar_range: &cav_lidar [ -102.4, -51.2, -3.5, 102.4, 51.2, 1.5 ]
 
 heter:
   assignment_path: null
@@ -33,7 +33,7 @@ heter:
         # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
         core_method: 'SpVoxelPreprocessor'
         args:
-          voxel_size: &voxel_size [0.4, 0.4, 5]
+          voxel_size: &voxel_size [ 0.4, 0.4, 5 ]
           max_points_per_voxel: 32
           max_voxel_train: 32000
           max_voxel_test: 70000
@@ -45,26 +45,26 @@ heter:
       core_method: &core_method_m2 "lift_splat_shoot"
 
       grid_conf: &grid_conf_m2
-        xbound: [-102.4, 102.4, 0.4]   # Limit the range of the x direction and divide the grids
-        ybound: [-51.2, 51.2, 0.4]   # Limit the range of the y direction and divide the grids
-        zbound: [-10, 10, 20.0]   # Limit the range of the z direction and divide the grids
-        ddiscr: [2, 100, 98]
+        xbound: [ -102.4, 102.4, 0.4 ]   # Limit the range of the x direction and divide the grids
+        ybound: [ -51.2, 51.2, 0.4 ]   # Limit the range of the y direction and divide the grids
+        zbound: [ -10, 10, 20.0 ]   # Limit the range of the z direction and divide the grids
+        ddiscr: [ 2, 100, 98 ]
         mode: 'LID'
       data_aug_conf: &data_aug_conf_m2
-        resize_lim: [0.27, 0.28]
-        final_dim: [288, 512]
-        rot_lim: [0, 0]
+        resize_lim: [ 0.27, 0.28 ]
+        final_dim: [ 288, 512 ]
+        rot_lim: [ 0, 0 ]
         H: 1080
         W: 1920
         rand_flip: False
-        bot_pct_lim: [0.0, 0.05]
-        cams: ['camera0', 'camera1', 'camera2', 'camera3']
+        bot_pct_lim: [ 0.0, 0.05 ]
+        cams: [ 'camera0', 'camera1', 'camera2', 'camera3' ]
         Ncams: 4
 
 fusion:
   core_method: 'intermediateheter'
   dataset: 'dairv2x'
-  args: 
+  args:
     proj_first: false
     grid_conf: None # place-holder
     data_aug_conf: None # place-holder
@@ -83,7 +83,7 @@ preprocess:
   # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
   core_method: 'SpVoxelPreprocessor'
   args:
-    voxel_size: [0.4, 0.4, 5] # useful
+    voxel_size: [ 0.4, 0.4, 5 ] # useful
     max_points_per_voxel: 1 # useless
     max_voxel_train: 1 # useless
     max_voxel_test: 1 # useless
@@ -99,7 +99,7 @@ postprocess:
     l: 3.9
     w: 1.6
     h: 1.56
-    r: &anchor_yaw [0, 90]
+    r: &anchor_yaw [ 0, 90 ]
     feature_stride: 2
     num: &anchor_num 2
   target_args:
@@ -132,15 +132,15 @@ model:
           use_norm: true
           with_distance: false
           use_absolute_xyz: true
-          num_filters: [64]
+          num_filters: [ 64 ]
         point_pillar_scatter:
           num_features: 64
 
       backbone_args:
-        layer_nums: [3]
-        layer_strides: [2]
-        num_filters: [64]
-  
+        layer_nums: [ 3 ]
+        layer_strides: [ 2 ]
+        num_filters: [ 64 ]
+
       aligner_args:
         core_method: identity
 
@@ -163,32 +163,32 @@ model:
         grid_conf: *grid_conf_m2
 
       backbone_args:
-        layer_nums: [3]
-        layer_strides: [2]
-        num_filters: [64]
+        layer_nums: [ 3 ]
+        layer_strides: [ 2 ]
+        num_filters: [ 64 ]
         inplanes: 128
-  
+
       aligner_args:
         core_method: identity
 
     fusion_method: att
-      feat_dim: [64, 128, 256]
+      feat_dim: [ 64, 128, 256 ]
 
     fusion_backbone:
-      layer_nums: [3, 5, 8]
-      layer_strides: [1, 2, 2]
-      num_filters: [64, 128, 256]
-      upsample_strides: [1, 2, 4]
-      num_upsample_filter: [128, 128, 128]
+      layer_nums: [ 3, 5, 8 ]
+      layer_strides: [ 1, 2, 2 ]
+      num_filters: [ 64, 128, 256 ]
+      upsample_strides: [ 1, 2, 4 ]
+      num_upsample_filter: [ 128, 128, 128 ]
 
-    shrink_header: 
+    shrink_header:
       kernal_size: [ 3 ]
       stride: [ 1 ]
       padding: [ 1 ]
       dim: [ 256 ]
       input_dim: 384 # 128 * 3
 
-    in_head: 256    
+    in_head: 256
     
     anchor_number: *anchor_num
     dir_args: *dir_args
@@ -224,5 +224,5 @@ optimizer:
 lr_scheduler:
   core_method: multistep #step, multistep and Exponential support
   gamma: 0.1
-  step_size: [10, 25]
+  step_size: [ 10, 25 ]
 

@@ -1,15 +1,18 @@
+import copy
+import math
+
 import torch
 import torch.nn as nn
-import math
-import copy
-from opencood.models.sub_modules.ms_deform_attn import MSDeformAttn
 import torch.nn.functional as F
+from opencood.models.sub_modules.ms_deform_attn import MSDeformAttn
+
 
 class PositionEmbeddingSine(nn.Module):
     """
     This is a more standard version of the position embedding, very similar to the one
     used by the Attention is all you need paper, generalized to work on images.
     """
+
     def __init__(self, num_pos_feats=64, temperature=10000, normalize=False, scale=None):
         super().__init__()
         self.num_pos_feats = num_pos_feats
@@ -27,7 +30,7 @@ class PositionEmbeddingSine(nn.Module):
             x: torch.Tensor
                 [N, C, H, W]
         """
-        mask = torch.zeros((x.shape[0], x.shape[-2],x.shape[-1]), dtype=torch.bool, device=x.device)
+        mask = torch.zeros((x.shape[0], x.shape[-2], x.shape[-1]), dtype=torch.bool, device=x.device)
         assert mask is not None
         not_mask = ~mask
         y_embed = not_mask.cumsum(1, dtype=torch.float32)
@@ -49,10 +52,7 @@ class PositionEmbeddingSine(nn.Module):
 
 
 class DeformableTransformerEncoderLayer(nn.Module):
-    def __init__(self,
-                 d_model=256, d_ffn=1024,
-                 dropout=0.1, activation="relu",
-                 n_levels=4, n_heads=8, n_points=4):
+    def __init__(self, d_model=256, d_ffn=1024, dropout=0.1, activation="relu", n_levels=4, n_heads=8, n_points=4):
         super().__init__()
 
         # self attention
@@ -80,7 +80,9 @@ class DeformableTransformerEncoderLayer(nn.Module):
 
     def forward(self, src, pos, reference_points, spatial_shapes, level_start_index, padding_mask=None):
         # self attention
-        src2 = self.self_attn(self.with_pos_embed(src, pos), reference_points, src, spatial_shapes, level_start_index, padding_mask)
+        src2 = self.self_attn(
+            self.with_pos_embed(src, pos), reference_points, src, spatial_shapes, level_start_index, padding_mask
+        )
         src = src + self.dropout1(src2)
         src = self.norm1(src)
 
@@ -101,8 +103,10 @@ class DeformableTransformerEncoder(nn.Module):
         reference_points_list = []
         for lvl, (H_, W_) in enumerate(spatial_shapes):
 
-            ref_y, ref_x = torch.meshgrid(torch.linspace(0.5, H_ - 0.5, H_, dtype=torch.float32, device=device),
-                                          torch.linspace(0.5, W_ - 0.5, W_, dtype=torch.float32, device=device))
+            ref_y, ref_x = torch.meshgrid(
+                torch.linspace(0.5, H_ - 0.5, H_, dtype=torch.float32, device=device),
+                torch.linspace(0.5, W_ - 0.5, W_, dtype=torch.float32, device=device),
+            )
             ref_y = ref_y.reshape(-1)[None] / (valid_ratios[:, None, lvl, 1] * H_)
             ref_x = ref_x.reshape(-1)[None] / (valid_ratios[:, None, lvl, 0] * W_)
             ref = torch.stack((ref_x, ref_y), -1)
@@ -121,10 +125,9 @@ class DeformableTransformerEncoder(nn.Module):
         return output
 
 
-
-
 def _get_clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
+
 
 def _get_activation_fn(activation):
     """Return an activation function given a string"""
@@ -134,4 +137,4 @@ def _get_activation_fn(activation):
         return F.gelu
     if activation == "glu":
         return F.glu
-    raise RuntimeError(F"activation should be relu/gelu, not {activation}.")
+    raise RuntimeError(f"activation should be relu/gelu, not {activation}.")

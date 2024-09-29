@@ -6,9 +6,9 @@
 Implementation of When2com Fusion
 """
 
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
 
 from opencood.models.sub_modules.torch_transformation_utils import warp_affine_simple
 
@@ -17,20 +17,20 @@ class When2comFusion(nn.Module):
     def __init__(self, args):
         super(When2comFusion, self).__init__()
 
-        self.discrete_ratio = args['voxel_size'][0]  
-        self.downsample_rate = args['downsample_rate']  
+        self.discrete_ratio = args["voxel_size"][0]
+        self.downsample_rate = args["downsample_rate"]
 
-        self.in_channels = args['in_channels']
-        self.feat_H = args['H']
-        self.feat_W = args['W']
-        self.query_size = args['query_size']
-        self.key_size = args['key_size']
-        self.mode = args['mode']
+        self.in_channels = args["in_channels"]
+        self.feat_H = args["H"]
+        self.feat_W = args["W"]
+        self.query_size = args["query_size"]
+        self.key_size = args["key_size"]
+        self.mode = args["mode"]
         self.agent_num = 2
 
         self.query_key_net = policy_net4(self.in_channels)
-        self.key_net = km_generator(out_size=self.key_size, input_feat_h=self.feat_H//4, input_feat_w=self.feat_W//4)
-        self.query_net = km_generator(out_size=self.query_size, input_feat_h=self.feat_H//4, input_feat_w=self.feat_W//4)
+        self.key_net = km_generator(out_size=self.key_size, input_feat_h=self.feat_H // 4, input_feat_w=self.feat_W // 4)
+        self.query_net = km_generator(out_size=self.query_size, input_feat_h=self.feat_H // 4, input_feat_w=self.feat_W // 4)
         self.attention_net = MIMOGeneralDotProductAttention(self.query_size, self.key_size)
 
     def activated_select(self, val_mat, prob_action, thres=0.2):
@@ -46,9 +46,7 @@ class When2comFusion(nn.Module):
         count_coef = coef_act.clone()
         ind = np.diag_indices(self.agent_num)
         count_coef[:, ind[0], ind[1]] = 0
-        num_connect = torch.nonzero(count_coef).shape[0] / (
-            self.agent_num * count_coef.shape[0]
-        )
+        num_connect = torch.nonzero(count_coef).shape[0] / (self.agent_num * count_coef.shape[0])
         return feat_act, coef_act, num_connect
 
     def regroup(self, x, record_len):
@@ -59,23 +57,23 @@ class When2comFusion(nn.Module):
     def forward(self, x, record_len, pairwise_t_matrix, weight=None):
         """
         Fusion forwarding.
-        
+
         Parameters
         ----------
         x : torch.Tensor
             input data, (sum(n_cav), C, H, W)
-            
+
         record_len : list
             shape: (B)
-            
+
         pairwise_t_matrix : torch.Tensor
-            The transformation matrix from each cav to ego, 
-            shape: (B, L, L, 4, 4) 
-        
+            The transformation matrix from each cav to ego,
+            shape: (B, L, L, 4, 4)
+
         weight: torch.Tensor
             Weight of aggregating coming message
             shape: (B, L, L)
-            
+
         Returns
         -------
         Fused feature.
@@ -84,11 +82,11 @@ class When2comFusion(nn.Module):
         B, L = pairwise_t_matrix.shape[:2]
 
         # (B,L,L,2,3)
-        pairwise_t_matrix = pairwise_t_matrix[:,:,:,[0, 1],:][:,:,:,:,[0, 1, 3]] # [B, L, L, 2, 3]
-        pairwise_t_matrix[...,0,1] = pairwise_t_matrix[...,0,1] * H / W
-        pairwise_t_matrix[...,1,0] = pairwise_t_matrix[...,1,0] * W / H
-        pairwise_t_matrix[...,0,2] = pairwise_t_matrix[...,0,2] / (self.downsample_rate * self.discrete_ratio * W) * 2
-        pairwise_t_matrix[...,1,2] = pairwise_t_matrix[...,1,2] / (self.downsample_rate * self.discrete_ratio * H) * 2
+        pairwise_t_matrix = pairwise_t_matrix[:, :, :, [0, 1], :][:, :, :, :, [0, 1, 3]]  # [B, L, L, 2, 3]
+        pairwise_t_matrix[..., 0, 1] = pairwise_t_matrix[..., 0, 1] * H / W
+        pairwise_t_matrix[..., 1, 0] = pairwise_t_matrix[..., 1, 0] * W / H
+        pairwise_t_matrix[..., 0, 2] = pairwise_t_matrix[..., 0, 2] / (self.downsample_rate * self.discrete_ratio * W) * 2
+        pairwise_t_matrix[..., 1, 2] = pairwise_t_matrix[..., 1, 2] / (self.downsample_rate * self.discrete_ratio * H) * 2
 
         # split x:[(L1, C, H, W), (L2, C, H, W), ...]
         # for example [[2, 256, 50, 176], [1, 256, 50, 176], ...]
@@ -108,9 +106,7 @@ class When2comFusion(nn.Module):
             # (N,C,H,W) neighbor_feature is agent i's neighborhood warping to agent i's perspective
             # Notice we put i one the first dim of t_matrix. Different from original.
             # t_matrix[i,j] = Tji
-            neighbor_feature = warp_affine_simple(batch_node_features[b],
-                                            t_matrix[0, :, :, :],
-                                            (H, W))
+            neighbor_feature = warp_affine_simple(batch_node_features[b], t_matrix[0, :, :, :], (H, W))
             query_key_maps = self.query_key_net(neighbor_feature)
             keys = self.key_net(query_key_maps)
             query = self.query_net(query_key_maps[0].unsqueeze(0))
@@ -127,8 +123,9 @@ class When2comFusion(nn.Module):
             updated_node_features.append(feat_fuse.squeeze(0))
 
         out = torch.cat(updated_node_features, dim=0)
-        
+
         return out
+
 
 class conv2DBatchNormRelu(nn.Module):
     def __init__(
@@ -155,9 +152,7 @@ class conv2DBatchNormRelu(nn.Module):
         )
 
         if is_batchnorm:
-            self.cbr_unit = nn.Sequential(
-                conv_mod, nn.BatchNorm2d(int(n_filters)), nn.ReLU(inplace=True)
-            )
+            self.cbr_unit = nn.Sequential(conv_mod, nn.BatchNorm2d(int(n_filters)), nn.ReLU(inplace=True))
         else:
             self.cbr_unit = nn.Sequential(conv_mod, nn.ReLU(inplace=True))
 
@@ -171,7 +166,7 @@ class Sparsemax(nn.Module):
 
     def __init__(self, dim=None):
         """Initialize sparsemax activation
-        
+
         Args:
             dim (int, optional): The dimension over which to apply the sparsemax function.
         """
@@ -190,7 +185,7 @@ class Sparsemax(nn.Module):
         # so we reshape and reshape back after sparsemax
         original_size = input.size()
         input = input.view(-1, input.size(self.dim))
-        
+
         dim = 1
         number_of_logits = input.size(dim)
 
@@ -234,21 +229,24 @@ class Sparsemax(nn.Module):
 
         return self.grad_input
 
+
 class km_generator(nn.Module):
     def __init__(self, out_size=128, input_feat_h=25, input_feat_w=63):
         super(km_generator, self).__init__()
         # self.n_feat = int(256 * (input_feat_h//4 + 1) * (input_feat_w//4 + 1))
         self.n_feat = int(256 * input_feat_h * input_feat_w)
         self.fc = nn.Sequential(
-            nn.Linear(self.n_feat, 256), #            
+            nn.Linear(self.n_feat, 256),  #
             nn.ReLU(inplace=True),
-            nn.Linear(256, 128), #             
+            nn.Linear(256, 128),  #
             nn.ReLU(inplace=True),
-            nn.Linear(128, out_size)) #            
+            nn.Linear(128, out_size),
+        )  #
 
     def forward(self, feat_map):
         outputs = self.fc(feat_map.view(-1, self.n_feat))
         return outputs
+
 
 class km_generator_v2(nn.Module):
     def __init__(self, out_size=128):
@@ -256,24 +254,26 @@ class km_generator_v2(nn.Module):
         # N, C = 256, H, W
         self.conv1 = conv2DBatchNormRelu(256, 128, k_size=3, stride=2, padding=1)
         self.avgp = nn.AdaptiveAvgPool2d((5, 7))
-        self.n_feat = int(128*5*7)
+        self.n_feat = int(128 * 5 * 7)
         self.fc = nn.Sequential(
-            nn.Linear(self.n_feat, 256), #            
+            nn.Linear(self.n_feat, 256),  #
             nn.ReLU(inplace=True),
-            nn.Linear(256, 128), #             
+            nn.Linear(256, 128),  #
             nn.ReLU(inplace=True),
-            nn.Linear(128, out_size)) #    
+            nn.Linear(128, out_size),
+        )  #
 
     def forward(self, feat_map):
         feat_map = self.avgp(self.conv1(feat_map))
         outputs = self.fc(feat_map.view(-1, self.n_feat))
         return outputs
 
+
 class policy_net4(nn.Module):
     def __init__(self, in_channel):
         super(policy_net4, self).__init__()
         # Encoder
-        # down 1 
+        # down 1
         self.conv1 = conv2DBatchNormRelu(in_channel, 512, k_size=3, stride=1, padding=1)
         self.conv2 = conv2DBatchNormRelu(512, 256, k_size=3, stride=1, padding=1)
         self.conv3 = conv2DBatchNormRelu(256, 256, k_size=3, stride=2, padding=1)
@@ -290,8 +290,9 @@ class policy_net4(nn.Module):
         outputs = self.conv5(outputs)
         return outputs
 
+
 class MIMOGeneralDotProductAttention(nn.Module):
-    ''' Scaled Dot-Product Attention '''
+    """Scaled Dot-Product Attention"""
 
     def __init__(self, query_size, key_size, warp_flag=True, attn_dropout=0.1):
         super().__init__()
@@ -299,7 +300,7 @@ class MIMOGeneralDotProductAttention(nn.Module):
         self.softmax = nn.Softmax(dim=1)
         self.linear = nn.Linear(query_size, key_size)
         self.warp_flag = warp_flag
-        print('Msg size: ',query_size,'  Key size: ', key_size)
+        print("Msg size: ", query_size, "  Key size: ", key_size)
 
     def forward(self, qu, k, v, sparse=True):
         # qu (b, q_agents, query_size)
@@ -357,7 +358,7 @@ class AdditiveAttentin(nn.Module):
             attn_orig = self.sparsemax(attn_orig)  # [b, N, 1]
         else:
             attn_orig = self.softmax(attn_orig)  # [b, N, 1]
-        attn = attn_orig.unsqueeze(-1).unsqueeze(-1) # [b, N, 1, 1, 1]
-        output = attn * v # [b, N, C, H, W]
+        attn = attn_orig.unsqueeze(-1).unsqueeze(-1)  # [b, N, 1, 1, 1]
+        output = attn * v  # [b, N, C, H, W]
         output = output.sum(1)  # (b, C, H, W)
         return output, attn

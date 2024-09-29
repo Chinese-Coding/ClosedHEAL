@@ -4,12 +4,14 @@
 
 import glob
 import os
-import sys
 import re
+import sys
+
 
 def get_number_from_filename(filename):
-    match = re.search(r'net_epoch(\d+).pth', filename)
+    match = re.search(r"net_epoch(\d+).pth", filename)
     return int(match.group(1)) if match else 0
+
 
 def clean_all_numeric_checkpoint(path):
     """

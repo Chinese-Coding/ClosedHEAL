@@ -7,12 +7,13 @@
 
 import numpy as np
 cimport numpy as np
-from cython.parallel import prange, parallel
 
+cimport
+numpy as np
+import numpy as np
 
 DTYPE = np.float32
 ctypedef float DTYPE_t
-
 
 def bbox_overlaps(
         np.ndarray[DTYPE_t, ndim=2] boxes,
@@ -34,18 +35,18 @@ def bbox_overlaps(
     cdef unsigned int k, n
     for k in range(K):
         box_area = (
-            (query_boxes[k, 2] - query_boxes[k, 0] + 1) *
-            (query_boxes[k, 3] - query_boxes[k, 1] + 1)
+                (query_boxes[k, 2] - query_boxes[k, 0] + 1) *
+                (query_boxes[k, 3] - query_boxes[k, 1] + 1)
         )
         for n in range(N):
             iw = (
-                min(boxes[n, 2], query_boxes[k, 2]) -
-                max(boxes[n, 0], query_boxes[k, 0]) + 1
+                    min(boxes[n, 2], query_boxes[k, 2]) -
+                    max(boxes[n, 0], query_boxes[k, 0]) + 1
             )
             if iw > 0:
                 ih = (
-                    min(boxes[n, 3], query_boxes[k, 3]) -
-                    max(boxes[n, 1], query_boxes[k, 1]) + 1
+                        min(boxes[n, 3], query_boxes[k, 3]) -
+                        max(boxes[n, 1], query_boxes[k, 1]) + 1
                 )
                 if ih > 0:
                     ua = float(
@@ -78,18 +79,18 @@ def bbox_intersections(
     cdef unsigned int k, n
     for k in range(K):
         box_area = (
-            (query_boxes[k, 2] - query_boxes[k, 0] + 1) *
-            (query_boxes[k, 3] - query_boxes[k, 1] + 1)
+                (query_boxes[k, 2] - query_boxes[k, 0] + 1) *
+                (query_boxes[k, 3] - query_boxes[k, 1] + 1)
         )
         for n in range(N):
             iw = (
-                min(boxes[n, 2], query_boxes[k, 2]) -
-                max(boxes[n, 0], query_boxes[k, 0]) + 1
+                    min(boxes[n, 2], query_boxes[k, 2]) -
+                    max(boxes[n, 0], query_boxes[k, 0]) + 1
             )
             if iw > 0:
                 ih = (
-                    min(boxes[n, 3], query_boxes[k, 3]) -
-                    max(boxes[n, 1], query_boxes[k, 1]) + 1
+                        min(boxes[n, 3], query_boxes[k, 3]) -
+                        max(boxes[n, 1], query_boxes[k, 1]) + 1
                 )
                 if ih > 0:
                     intersec[n, k] = iw * ih / box_area
@@ -111,7 +112,7 @@ def box_vote(
     cdef float bi0, bi1, bit2, bi3
     cdef float iw, ih, ua
 
-    cdef float thresh=0.5
+    cdef float thresh = 0.5
 
     for i in range(N):
         det = dets_NMS[i, :]
@@ -132,7 +133,8 @@ def box_vote(
             if not (iw > 0 and ih > 0):
                 continue
 
-            ua = (det[2] - det[0] + 1) * (det[3] - det[1] + 1) + (det2[2] - det2[0] + 1) * (det2[3] - det2[1] + 1) - iw * ih
+            ua = (det[2] - det[0] + 1) * (det[3] - det[1] + 1) + (det2[2] - det2[0] + 1) * (
+                        det2[3] - det2[1] + 1) - iw * ih
             ov = iw * ih / ua
 
             if (ov < thresh):
@@ -142,6 +144,6 @@ def box_vote(
             acc_score += det2[4]
 
         dets_voted[i][0:4] = acc_box / acc_score
-        dets_voted[i][4] = det[4]       # Keep the original score
+        dets_voted[i][4] = det[4]  # Keep the original score
 
     return dets_voted

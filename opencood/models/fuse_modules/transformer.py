@@ -2,16 +2,14 @@
 Implementation of Simple transformer fusion.
 """
 
+import kornia
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import kornia
 
 
 class TransformerMessage(nn.Module):
-    def __init__(self, 
-                 in_channels=64,
-                 trans_layer=[3]):
+    def __init__(self, in_channels=64, trans_layer=[3]):
         super(TransformerMessage, self).__init__()
         self.in_channels = in_channels
 
@@ -31,24 +29,24 @@ class TransformerMessage(nn.Module):
             dropout0 = nn.Dropout(dropout)
             dropout1 = nn.Dropout(dropout)
             dropout2 = nn.Dropout(dropout)
-            self.__setattr__('cross_attn'+str(c_layer), cross_attn)
-            self.__setattr__('linear1_'+str(c_layer), linear1)
-            self.__setattr__('linear2_'+str(c_layer), linear2)
-            self.__setattr__('norm1_'+str(c_layer), norm1)
-            self.__setattr__('norm2_'+str(c_layer), norm2)
-            self.__setattr__('dropout0_'+str(c_layer), dropout0)
-            self.__setattr__('dropout1_'+str(c_layer), dropout1)
-            self.__setattr__('dropout2_'+str(c_layer), dropout2)
+            self.__setattr__("cross_attn" + str(c_layer), cross_attn)
+            self.__setattr__("linear1_" + str(c_layer), linear1)
+            self.__setattr__("linear2_" + str(c_layer), linear2)
+            self.__setattr__("norm1_" + str(c_layer), norm1)
+            self.__setattr__("norm2_" + str(c_layer), norm2)
+            self.__setattr__("dropout0_" + str(c_layer), dropout0)
+            self.__setattr__("dropout1_" + str(c_layer), dropout1)
+            self.__setattr__("dropout2_" + str(c_layer), dropout2)
 
     def add_pe_map(self, x, normalized=True):
-        """ Add positional encoding to feature map.
+        """Add positional encoding to feature map.
         Args:
             x: torch.Tensor
                 [N, C, H, W]
-        
+
         """
         # scale = 2 * math.pi
-        temperature = 10000 
+        temperature = 10000
         num_pos_feats = x.shape[-3] // 2  # d
 
         mask = torch.zeros([x.shape[-2], x.shape[-1]], dtype=torch.bool, device=x.device)
@@ -66,9 +64,9 @@ class TransformerMessage(nn.Module):
         pos = torch.cat((pos_y, pos_x), dim=2).permute(2, 0, 1)
 
         if len(x.shape) == 5:
-            x = x + pos[None,None,:,:,:]
+            x = x + pos[None, None, :, :, :]
         elif len(x.shape) == 6:
-            x = x + pos[None,None,None,:,:,:]
+            x = x + pos[None, None, None, :, :, :]
         return x
 
     def forward(self, x, shift_mats, shift_mats_rev, agent_mask):
@@ -91,7 +89,6 @@ class TransformerMessage(nn.Module):
             feat_shifted.append(feat_shifted_i)
         feat_shifted = torch.cat([f.unsqueeze(1) for f in feat_shifted], dim=1)
 
-
         # ================================
         # x_fuse, _, _ = self.TRANSFORMER_MESSAGE([[],[],[],local_com_mat], [transformed_feature], num_agent_tensor)
 
@@ -99,38 +96,41 @@ class TransformerMessage(nn.Module):
             batch_updated_features = torch.zeros(batch, max_agent_num, c, h, w).to(shift_mats.device)
             for batch_i in range(batch):
                 N = int(torch.sum(agent_mask[batch_i]))
-                feat_map = x[batch_i:batch_i+1, :N, :, :, :]
-                val_feat = feat_shifted[batch_i:batch_i+1, :N, :N, :, :, :]
+                feat_map = x[batch_i : batch_i + 1, :N, :, :, :]
+                val_feat = feat_shifted[batch_i : batch_i + 1, :N, :N, :, :, :]
 
                 feat_map = self.add_pe_map(feat_map)
                 # [b,N,C,H,W] -> [b,N,H,W,C]
                 # [b,N,N,C,H,W] -> [N,b,N,H,W,C]
-                src = feat_map.permute(0,1,3,4,2).contiguous().view(N*h*w,c).contiguous().unsqueeze(0)
-                tgt = val_feat.permute(1,0,2,4,5,3).contiguous().view(N, N*h*w,c).contiguous()
+                src = feat_map.permute(0, 1, 3, 4, 2).contiguous().view(N * h * w, c).contiguous().unsqueeze(0)
+                tgt = val_feat.permute(1, 0, 2, 4, 5, 3).contiguous().view(N, N * h * w, c).contiguous()
                 # print(src.shape)  # torch.Size([1, 120000, 64])
                 # print(tgt.shape)  # torch.Size([N, 120000, 64])
 
-                src2, weight_mat = eval('self.cross_attn'+str(c_layer))(src, tgt, value=tgt, attn_mask=None, key_padding_mask=None)
-                src = src + eval('self.dropout1_'+str(c_layer))(src2)
-                src = eval('self.norm1_'+str(c_layer))(src)
-                src2 = eval('self.linear2_'+str(c_layer))(eval('self.dropout0_'+str(c_layer))(F.relu(eval('self.linear1_'+str(c_layer))(src))))
-                src = src + eval('self.dropout2_'+str(c_layer))(src2)
-                src = eval('self.norm2_'+str(c_layer))(src)
+                src2, weight_mat = eval("self.cross_attn" + str(c_layer))(
+                    src, tgt, value=tgt, attn_mask=None, key_padding_mask=None
+                )
+                src = src + eval("self.dropout1_" + str(c_layer))(src2)
+                src = eval("self.norm1_" + str(c_layer))(src)
+                src2 = eval("self.linear2_" + str(c_layer))(
+                    eval("self.dropout0_" + str(c_layer))(F.relu(eval("self.linear1_" + str(c_layer))(src)))
+                )
+                src = src + eval("self.dropout2_" + str(c_layer))(src2)
+                src = eval("self.norm2_" + str(c_layer))(src)
 
                 feat_fuse = src.view(1, N, h, w, c).contiguous().permute(0, 1, 4, 2, 3).contiguous()
                 # print(feat_fuse.shape)  # torch.Size([1, N, 64, 200, 200])
                 batch_updated_features[batch_i, :N, :, :, :] = feat_fuse.squeeze(0)
-        
+
         return batch_updated_features, None
 
 
-if __name__=="__main__":
-    from icecream import ic
-    x = torch.rand((64,6,8))  # [C,H,W]
+if __name__ == "__main__":
+    x = torch.rand((64, 6, 8))  # [C,H,W]
     temperature = 10000
     num_pos_feats = x.shape[-3] // 2  # [d]
 
-    mask = torch.zeros([x.shape[-2], x.shape[-1]], dtype=torch.bool, device=x.device)  #[H, W]
+    mask = torch.zeros([x.shape[-2], x.shape[-1]], dtype=torch.bool, device=x.device)  # [H, W]
     not_mask = ~mask
     y_embed = not_mask.cumsum(0, dtype=torch.float32)  # [H, W]
     x_embed = not_mask.cumsum(1, dtype=torch.float32)  # [H, W]

@@ -2,10 +2,8 @@ from typing import Tuple
 
 import torch
 import torch.nn as nn
+from opencood.pcdet_utils.pointnet2.pointnet2_batch import pointnet2_batch_cuda as pointnet2
 from torch.autograd import Function, Variable
-
-from opencood.pcdet_utils.pointnet2.pointnet2_batch import \
-    pointnet2_batch_cuda as pointnet2
 
 
 class FurthestPointSampling(Function):

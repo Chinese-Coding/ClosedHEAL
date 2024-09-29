@@ -6,9 +6,8 @@ import os
 
 import numpy as np
 import torch
-
-from opencood.utils import common_utils
 from opencood.hypes_yaml import yaml_utils
+from opencood.utils import common_utils
 
 
 def voc_ap(rec, prec):
@@ -33,7 +32,7 @@ def voc_ap(rec, prec):
 
     ap = 0.0
     for i in i_list:
-        ap += ((mrec[i] - mrec[i - 1]) * mpre[i])
+        ap += (mrec[i] - mrec[i - 1]) * mpre[i]
     return ap, mrec, mpre
 
 
@@ -66,7 +65,7 @@ def caluclate_tp_fp(det_boxes, det_score, gt_boxes, result_stat, iou_thresh):
 
         # sort the prediction bounding box by score
         score_order_descend = np.argsort(-det_score)
-        det_score = det_score[score_order_descend] # from high to low
+        det_score = det_score[score_order_descend]  # from high to low
         det_polygon_list = list(common_utils.convert_format(det_boxes))
         gt_polygon_list = list(common_utils.convert_format(gt_boxes))
 
@@ -85,11 +84,10 @@ def caluclate_tp_fp(det_boxes, det_score, gt_boxes, result_stat, iou_thresh):
 
             gt_index = np.argmax(ious)
             gt_polygon_list.pop(gt_index)
-        result_stat[iou_thresh]['score'] += det_score.tolist()
-    result_stat[iou_thresh]['fp'] += fp
-    result_stat[iou_thresh]['tp'] += tp
-    result_stat[iou_thresh]['gt'] += gt
-
+        result_stat[iou_thresh]["score"] += det_score.tolist()
+    result_stat[iou_thresh]["fp"] += fp
+    result_stat[iou_thresh]["tp"] += tp
+    result_stat[iou_thresh]["gt"] += gt
 
 
 def calculate_ap(result_stat, iou):
@@ -103,16 +101,16 @@ def calculate_ap(result_stat, iou):
     """
     iou_5 = result_stat[iou]
 
-    fp = np.array(iou_5['fp'])
-    tp = np.array(iou_5['tp'])
-    score = np.array(iou_5['score'])
+    fp = np.array(iou_5["fp"])
+    tp = np.array(iou_5["tp"])
+    score = np.array(iou_5["score"])
     assert len(fp) == len(tp) and len(tp) == len(score)
 
     sorted_index = np.argsort(-score)
     fp = fp[sorted_index].tolist()
     tp = tp[sorted_index].tolist()
 
-    gt_total = iou_5['gt']
+    gt_total = iou_5["gt"]
 
     cumsum = 0
     for idx, val in enumerate(fp):
@@ -144,21 +142,26 @@ def eval_final_results(result_stat, save_path, infer_info=None):
     ap_50, mrec_50, mpre_50 = calculate_ap(result_stat, 0.50)
     ap_70, mrec_70, mpre_70 = calculate_ap(result_stat, 0.70)
 
-    dump_dict.update({'ap30': ap_30,
-                      'ap_50': ap_50,
-                      'ap_70': ap_70,
-                      'mpre_50': mpre_50,
-                      'mrec_50': mrec_50,
-                      'mpre_70': mpre_70,
-                      'mrec_70': mrec_70,
-                      })
+    dump_dict.update(
+        {
+            "ap30": ap_30,
+            "ap_50": ap_50,
+            "ap_70": ap_70,
+            "mpre_50": mpre_50,
+            "mrec_50": mrec_50,
+            "mpre_70": mpre_70,
+            "mrec_70": mrec_70,
+        }
+    )
     if infer_info is None:
-        yaml_utils.save_yaml(dump_dict, os.path.join(save_path, 'eval.yaml'))
+        yaml_utils.save_yaml(dump_dict, os.path.join(save_path, "eval.yaml"))
     else:
-        yaml_utils.save_yaml(dump_dict, os.path.join(save_path, f'eval_{infer_info}.yaml'))
+        yaml_utils.save_yaml(dump_dict, os.path.join(save_path, f"eval_{infer_info}.yaml"))
 
-    print('The Average Precision at IOU 0.3 is %.2f, '
-          'The Average Precision at IOU 0.5 is %.2f, '
-          'The Average Precision at IOU 0.7 is %.2f' % (ap_30, ap_50, ap_70))
+    print(
+        "The Average Precision at IOU 0.3 is %.2f, "
+        "The Average Precision at IOU 0.5 is %.2f, "
+        "The Average Precision at IOU 0.7 is %.2f" % (ap_30, ap_50, ap_70)
+    )
 
     return ap_30, ap_50, ap_70
