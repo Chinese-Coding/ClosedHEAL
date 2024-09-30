@@ -11,6 +11,7 @@ from opencood.data_utils.datasets.intermediate_fusion_dataset import getIntermed
 from opencood.data_utils.datasets.intermediate_heter_fusion_dataset import getIntermediateheterFusionDataset
 from opencood.data_utils.datasets.late_fusion_dataset import getLateFusionDataset
 from opencood.data_utils.datasets.late_heter_fusion_dataset import getLateheterFusionDataset
+from torch.utils.data import Subset
 
 
 def build_dataset(dataset_cfg, visualize=False, train=True):
@@ -34,5 +35,5 @@ def build_dataset(dataset_cfg, visualize=False, train=True):
     base_dataset_cls = eval(base_dataset_cls)
 
     dataset = fusion_dataset_func(base_dataset_cls)(params=dataset_cfg, visualize=visualize, train=train)
-
+    dataset = Subset(dataset, range(0, 100))  # 使用 Subset, 只让一部分数据进行训练
     return dataset

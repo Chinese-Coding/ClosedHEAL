@@ -35,7 +35,7 @@ def main():
         opencood_train_dataset,
         batch_size=hypes["train_params"]["batch_size"],
         num_workers=4,
-        collate_fn=opencood_train_dataset.collate_batch_train,
+        collate_fn=opencood_train_dataset.dataset.collate_batch_train,  # WARNING: 如果想要全部数据进行训练需要修改这里
         shuffle=True,
         pin_memory=False,  # 这里先改成 False, 先跑起来再说
         drop_last=True,
@@ -45,7 +45,7 @@ def main():
         opencood_validate_dataset,
         batch_size=hypes["train_params"]["batch_size"],
         num_workers=4,
-        collate_fn=opencood_train_dataset.collate_batch_train,
+        collate_fn=opencood_train_dataset.dataset.collate_batch_train,  # WARNING: 如果想要全部数据进行训练需要修改这里
         shuffle=True,
         pin_memory=False,  # 这里先改成 False, 先跑起来再说
         drop_last=True,
@@ -167,7 +167,7 @@ def main():
 
         scheduler.step(epoch)
 
-        opencood_train_dataset.reinitialize()
+        opencood_train_dataset.dataset.reinitialize()  # WARNING: 如果想要全部数据进行训练需要修改这里
 
     print("Training Finished, checkpoints saved to %s" % saved_path)
 
