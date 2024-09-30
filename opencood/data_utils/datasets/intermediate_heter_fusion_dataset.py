@@ -6,13 +6,12 @@ License: TDG-Attribution-NonCommercial-NoDistrib
 intermediate heter fusion dataset
 
 Note that for DAIR-V2X dataset,
-Each agent should retrieve the objects itself, and merge them by iou, 
+Each agent should retrieve the objects itself, and merge them by iou,
 instead of using the cooperative label.
 """
 
 import copy
 import math
-from collections import OrderedDict
 
 import numpy as np
 import torch
@@ -45,29 +44,25 @@ def getIntermediateheterFusionDataset(cls):
         def __init__(self, params, visualize, train=True):
             super().__init__(params, visualize, train)
             # intermediate and supervise single
-            self.supervise_single = (
-                True
-                if ("supervise_single" in params["model"]["args"] and params["model"]["args"]["supervise_single"])
-                else False
-            )
-            self.proj_first = False if "proj_first" not in params["fusion"]["args"] else params["fusion"]["args"]["proj_first"]
+            # 来自GPT: 优化条件判断
+            self.supervise_single = params["model"]["args"].get("supervise_single", False)
+            self.proj_first = params["fusion"]["args"].get("proj_first", False)
 
             self.anchor_box = self.post_processor.generate_anchor_box()
             self.anchor_box_torch = torch.from_numpy(self.anchor_box)
 
             self.heterogeneous = True
+            # 来自GPT: 多重嵌套 if-else 简化
             self.modality_assignment = (
-                None
-                if ("assignment_path" not in params["heter"] or params["heter"]["assignment_path"] is None)
-                else read_json(params["heter"]["assignment_path"])
+                read_json(params["heter"]["assignment_path"]) if params["heter"].get("assignment_path") else None
             )
 
             self.ego_modality = params["heter"]["ego_modality"]  # "m1" or "m1&m2" or "m3"
 
             self.modality_name_list = list(params["heter"]["modality_setting"].keys())
-            self.sensor_type_dict = OrderedDict()
+            self.sensor_type_dict = {}
 
-            lidar_channels_dict = params["heter"].get("lidar_channels_dict", OrderedDict())
+            lidar_channels_dict = params["heter"].get("lidar_channels_dict", {})
             mapping_dict = params["heter"]["mapping_dict"]
             cav_preference = params["heter"].get("cav_preference", None)
 
@@ -85,20 +80,18 @@ def getIntermediateheterFusionDataset(cls):
                 self.sensor_type_dict[modality_name] = modal_setting["sensor_type"]
                 if modal_setting["sensor_type"] == "lidar":
                     setattr(self, f"pre_processor_{modality_name}", build_preprocessor(modal_setting["preprocess"], train))
-
                 elif modal_setting["sensor_type"] == "camera":
                     setattr(self, f"data_aug_conf_{modality_name}", modal_setting["data_aug_conf"])
-
                 else:
-                    raise ("Not support this type of sensor")
+                    # 来自GPT: 类型错误提示更加精准
+                    raise TypeError("Not support this type of sensor")
 
             self.reinitialize()
 
             self.kd_flag = params.get("kd_flag", False)
-
-            self.box_align = False
-            if "box_align" in params:
-                self.box_align = True
+            # 来自GPT: 减少冗余变量的赋值
+            self.box_align = params.get("box_align", False)
+            if self.box_align:
                 self.stage1_result_path = params["box_align"]["train_result"] if train else params["box_align"]["val_result"]
                 self.stage1_result = read_json(self.stage1_result_path)
                 self.box_align_args = params["box_align"]["args"]
@@ -281,7 +274,7 @@ def getIntermediateheterFusionDataset(cls):
             base_data_dict = self.retrieve_base_data(idx)
             base_data_dict = add_noise_data_dict(base_data_dict, self.params["noise_setting"])
 
-            processed_data_dict = OrderedDict()
+            processed_data_dict = {}
             processed_data_dict["ego"] = {}
 
             ego_id = -1
@@ -591,9 +584,7 @@ def getIntermediateheterFusionDataset(cls):
 
                 for modality_name in self.modality_name_list:
                     if ego_dict[f"input_{modality_name}"] is not None:
-                        eval(f"inputs_list_{modality_name}").append(
-                            ego_dict[f"input_{modality_name}"]
-                        )  # OrderedDict() if empty?
+                        eval(f"inputs_list_{modality_name}").append(ego_dict[f"input_{modality_name}"])  # {} if empty?
 
                 agent_modality_list.extend(ego_dict["agent_modality_list"])
 
