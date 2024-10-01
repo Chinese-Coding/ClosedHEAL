@@ -5,11 +5,7 @@
 # Written by Sergey Karayev
 # --------------------------------------------------------
 
-import numpy as np
 cimport numpy as np
-
-cimport
-numpy as np
 import numpy as np
 
 DTYPE = np.float32

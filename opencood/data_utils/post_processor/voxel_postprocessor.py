@@ -14,6 +14,8 @@ import torch
 import torch.nn.functional as F
 from opencood.data_utils.post_processor.base_postprocessor import BasePostprocessor
 from opencood.utils import box_utils
+import pyximport
+pyximport.install(language_level=3, setup_args={"include_dirs": np.get_include()})
 from opencood.utils.box_overlaps import bbox_overlaps
 from opencood.utils.common_utils import limit_period
 from opencood.visualization import vis_utils

@@ -1,2 +1,24 @@
 [tool.blcak]
 line-length = 128
+
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "OpenCOOD"
+version = "0.1.0"  # 或者是从其他地方动态获取版本信息
+description = "An opensource pytorch framework for autonomous driving cooperative detection"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Yifan Lu", email = "yifan_lu@sjtu.edu.cn"},
+    {name = "zfq", email = "zhangfengqianbupt@bupt.edu.cn"}
+]
+
+# 设置你的依赖项，之前在 `install_requires` 中定义
+dependencies = []
+
+[project.urls]
+# 添加任何相关的项目 URL
