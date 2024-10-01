@@ -32,7 +32,7 @@ def _GetTimestampDataPath(cavPath, timestamp):
     lidar_file = os.path.join(cavPath, timestamp + ".pcd")
     camera_files = [Path(cavPath) / f"{timestamp}_camera{i}.png" for i in range(4)]
     depth_files = [Path(cavPath) / f"{timestamp}_depth{i}.png" for i in range(4)]
-    depth_files = [depth_file.replace("OPV2V", "OPV2V_Hetero") for depth_file in depth_files]
+    depth_files = [str(depth_file).replace("OPV2V", "OPV2V_Hetero") for depth_file in depth_files]
     return yaml_file, lidar_file, camera_files, depth_files
 
 
@@ -139,7 +139,7 @@ class OPV2VBaseDataset(Dataset):
             make the first cav to be ego modality
             """
             if getattr(self, "heterogeneous", False):
-                scenario_name = scenario_folder.split("/")[-1]
+                scenario_name = scenario_folder.stem
                 cav_list = self.adaptor.reorder_cav_list(cav_list, scenario_name)
 
             # loop over all CAV data
@@ -170,12 +170,12 @@ class OPV2VBaseDataset(Dataset):
                     }
 
                     if getattr(self, "heterogeneous", False):
-                        scenario_name = scenario_folder.split("/")[-1]
+                        scenario_name = scenario_folder.stem
 
                         cav_modality = self.adaptor.reassign_cav_modality(self.modality_assignment[scenario_name][cav_id], j)
 
                         self.scenario_database[i][cav_id][timestamp].update(
-                            {"modality": cav_modality, "lidar": self.adaptor.switch_lidar_channels(cav_modality, lidar_file)}
+                            {"modality_name": cav_modality, "lidar": self.adaptor.switch_lidar_channels(cav_modality, lidar_file)}
                         )
 
                     # load extra data
@@ -207,7 +207,7 @@ class OPV2VBaseDataset(Dataset):
     def _LoadCameraAndDepth(self, cavContent, timestampKey):
         """Load camera and depth data. (hdf5 is faster than png)"""
         cameraData, depthData = [], []
-        hdf5_file = cavContent[timestampKey]["cameras"][0].replace("camera0.png", "imgs.hdf5")
+        hdf5_file = str(cavContent[timestampKey]["cameras"][0]).replace("camera0.png", "imgs.hdf5")
         # TODO: 也许我应该试着把图片和深度信息转换成对应的 hdf5 格式
         if self.use_hdf5 and os.path.exists(hdf5_file):
             with h5py.File(hdf5_file, "r") as hdf5File:
@@ -257,10 +257,10 @@ class OPV2VBaseDataset(Dataset):
 
             # load lidar file
             if self.load_lidar_file or self.visualize:
-                data[cav_id]["lidar_np"] = pcd_utils.pcd_to_np(cav_content[timestamp_key]["lidar"])
+                cavData["lidar_np"] = pcd_utils.pcd_to_np(cav_content[timestamp_key]["lidar"])
 
             if getattr(self, "heterogeneous", False):
-                data[cav_id]["modality_name"] = cav_content[timestamp_key]["modality_name"]
+                cavData["modality_name"] = cav_content[timestamp_key]["modality_name"]
 
             for file_extension in self.add_data_extension:
                 # if not find in the current directory
@@ -269,8 +269,8 @@ class OPV2VBaseDataset(Dataset):
                 if not os.path.exists(filePath):
                     filePath = _ReplaceWithAdditional(filePath)
 
-                data[cav_id][file_extension] = load_yaml(filePath) if ".yaml" in file_extension else cv2.imread(filePath)
-
+                cavData[file_extension] = load_yaml(filePath) if ".yaml" in file_extension else cv2.imread(filePath)
+            data[cav_id] = cavData
         return data
 
     def __len__(self):

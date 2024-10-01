@@ -11,21 +11,14 @@ import numpy as np
 import torch
 from opencood.data_utils.pre_processor.base_preprocessor import BasePreprocessor
 
+from cumm import tensorview as tv
+from spconv.utils import Point2VoxelCPU3d as VoxelGenerator
+
 
 class SpVoxelPreprocessor(BasePreprocessor):
     def __init__(self, preprocess_params, train):
         super(SpVoxelPreprocessor, self).__init__(preprocess_params, train)
-        self.spconv = 1
-        try:
-            # spconv v1.x
-            from spconv.utils import VoxelGeneratorV2 as VoxelGenerator
-        except:
-            # spconv v2.x
-            from cumm import tensorview as tv
-            from spconv.utils import Point2VoxelCPU3d as VoxelGenerator
 
-            self.tv = tv
-            self.spconv = 2
         self.lidar_range = self.params["cav_lidar_range"]
         self.voxel_size = self.params["args"]["voxel_size"]
         self.max_points_per_voxel = self.params["args"]["max_points_per_voxel"]
@@ -39,29 +32,18 @@ class SpVoxelPreprocessor(BasePreprocessor):
         self.grid_size = np.round(grid_size).astype(np.int64)
 
         # use sparse conv library to generate voxel
-        if self.spconv == 1:
-            self.voxel_generator = VoxelGenerator(
-                voxel_size=self.voxel_size,
-                point_cloud_range=self.lidar_range,
-                max_num_points=self.max_points_per_voxel,
-                max_voxels=self.max_voxels,
-            )
-        else:
-            self.voxel_generator = VoxelGenerator(
-                vsize_xyz=self.voxel_size,
-                coors_range_xyz=self.lidar_range,
-                max_num_points_per_voxel=self.max_points_per_voxel,
-                num_point_features=4,
-                max_num_voxels=self.max_voxels,
-            )
+        self.voxel_generator = VoxelGenerator(
+            vsize_xyz=self.voxel_size,
+            coors_range_xyz=self.lidar_range,
+            max_num_points_per_voxel=self.max_points_per_voxel,
+            num_point_features=4,
+            max_num_voxels=self.max_voxels,
+        )
 
     def preprocess(self, pcd_np):
         data_dict = {}
-        if self.spconv == 1:
-            voxel_output = self.voxel_generator.generate(pcd_np)
-        else:
-            pcd_tv = self.tv.from_numpy(pcd_np)
-            voxel_output = self.voxel_generator.point_to_voxel(pcd_tv)
+        pcd_tv = tv.from_numpy(pcd_np)
+        voxel_output = self.voxel_generator.point_to_voxel(pcd_tv)
         if isinstance(voxel_output, dict):
             voxels, coordinates, num_points = (
                 voxel_output["voxels"],
@@ -71,10 +53,9 @@ class SpVoxelPreprocessor(BasePreprocessor):
         else:
             voxels, coordinates, num_points = voxel_output
 
-        if self.spconv == 2:
-            voxels = voxels.numpy()
-            coordinates = coordinates.numpy()
-            num_points = num_points.numpy()
+        voxels = voxels.numpy()
+        coordinates = coordinates.numpy()
+        num_points = num_points.numpy()
 
         data_dict["voxel_features"] = voxels
         data_dict["voxel_coords"] = coordinates

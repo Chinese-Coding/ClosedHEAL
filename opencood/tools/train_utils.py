@@ -91,7 +91,7 @@ def load_saved_model(saved_path, model):
             "resuming best validation model at epoch %d"
             % eval(file_list[0].split("/")[-1].rstrip(".pth").lstrip("net_epoch_bestval_at"))
         )
-        loaded_state_dict = torch.load(file_list[0], map_location="cpu")
+        loaded_state_dict = torch.load(file_list[0], map_location="cpu", weights_only=False)
         check_missing_key(model.state_dict(), loaded_state_dict)
         model.load_state_dict(loaded_state_dict, strict=False)
         return eval(file_list[0].split("/")[-1].rstrip(".pth").lstrip("net_epoch_bestval_at")), model
