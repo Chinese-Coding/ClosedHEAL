@@ -133,6 +133,8 @@ logs/
 *.c
 *.so
 .idea
+# poetry
+poetry.lock
 
 opv2v_data_dumping
 logs/

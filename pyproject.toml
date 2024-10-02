@@ -1,24 +1,23 @@
-[tool.blcak]
+[tool.poetry]
+name = "originheal"
+version = "0.1.0"
+description = ""
+license = "=MIT"
+authors = ["zfq <you@example.com>"]
+readme = "README.md"
+
+[tool.black]
 line-length = 128
+previcw = true
+unstable = true
+target-version = ["py311"]
+
+
+[tool.poetry.dependencies]
+python = "^3.11"
+black = "^24.8.0"
 
 
 [build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "OpenCOOD"
-version = "0.1.0"  # 或者是从其他地方动态获取版本信息
-description = "An opensource pytorch framework for autonomous driving cooperative detection"
-readme = "README.md"
-license = {text = "MIT"}
-authors = [
-    {name = "Yifan Lu", email = "yifan_lu@sjtu.edu.cn"},
-    {name = "zfq", email = "zhangfengqianbupt@bupt.edu.cn"}
-]
-
-# 设置你的依赖项，之前在 `install_requires` 中定义
-dependencies = []
-
-[project.urls]
-# 添加任何相关的项目 URL
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
