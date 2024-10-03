@@ -6,22 +6,25 @@ import json
 import os
 import random
 from pathlib import Path
+from typing import List, Dict, Union
 
 import cv2
 import h5py
 import numpy as np
-import opencood.utils.pcd_utils as pcd_utils
 from PIL import Image
+from torch.utils.data import Dataset
+
+import opencood.utils.pcd_utils as pcd_utils
 from opencood.data_utils.augmentor.data_augmentor import DataAugmentor
+from opencood.data_utils.data_models.dataset_models import PFTimestampData
 from opencood.data_utils.post_processor import build_postprocessor
 from opencood.data_utils.pre_processor import build_preprocessor
 from opencood.hypes_yaml.yaml_utils import load_yaml
 from opencood.utils.camera_utils import load_camera_data
 from opencood.utils.transformation_utils import x1_to_x2
-from torch.utils.data import Dataset
 
 
-def _GetTimestampDataPath(cavPath, timestamp):
+def _GetTimestampDataPath(cavPath: Path, timestamp: str):
     """
     获取某一时间戳下数据的路径
 
@@ -30,9 +33,8 @@ def _GetTimestampDataPath(cavPath, timestamp):
     """
     yaml_file = os.path.join(cavPath, timestamp + ".yaml")
     lidar_file = os.path.join(cavPath, timestamp + ".pcd")
-    camera_files = [Path(cavPath) / f"{timestamp}_camera{i}.png" for i in range(4)]
-    depth_files = [Path(cavPath) / f"{timestamp}_depth{i}.png" for i in range(4)]
-    depth_files = [str(depth_file).replace("OPV2V", "OPV2V_Hetero") for depth_file in depth_files]
+    camera_files, depth_files = [cavPath / f"{timestamp}_camera{i}.png" for i in range(4)], [cavPath / f"{timestamp}_depth{i}.png" for i in range(4)] # fmt: skip
+    depth_files = [Path(str(depth_file).replace("OPV2V", "OPV2V_Hetero")) for depth_file in depth_files]
     return yaml_file, lidar_file, camera_files, depth_files
 
 
@@ -107,23 +109,23 @@ class OPV2VBaseDataset(Dataset):
 
         # first load all paths of different scenarios
         # 来自GPT: 路径处理的优化
-        self.scenario_folders = sorted([folder for folder in Path(root_dir).iterdir() if folder.is_dir()])
+        self.scenario_folders: List[Path] = sorted(folder for folder in Path(root_dir).iterdir() if folder.is_dir())
 
         self.reinitialize()
 
     def reinitialize(self):
         # Structure: {scenario_id : {cav_1 : {timestamp1 : {yaml: path,
         # lidar: path, cameras:list of path}}}}
-        self.scenario_database = {}
+        self.scenario_database: List[Dict[str, Dict[str, Union[PFTimestampData, bool]]]] = []
         self.len_record = []
 
         # loop over all scenarios
         for i, scenario_folder in enumerate(self.scenario_folders):
-            self.scenario_database.update({i: {}})
+            self.scenario_database.append({})
 
             # at least 1 cav should show up
             # 用三元运算符来简化判断 (使用 sample 函数代替原先的 shuffle 函数, 因为sample函数有返回值写起来比较统一, 不知道应不影响性能)
-            cav_list = [cav.name for cav in Path(scenario_folder).iterdir() if cav.is_dir()]
+            cav_list: List[str] = [cav.name for cav in scenario_folder.iterdir() if cav.is_dir()]
             cav_list = random.sample(cav_list, len(cav_list)) if self.train else sorted(cav_list)
             assert len(cav_list) > 0
 
@@ -150,40 +152,36 @@ class OPV2VBaseDataset(Dataset):
                 self.scenario_database[i][cav_id] = {}
 
                 # save all yaml files to the dictionary
-                cav_path = os.path.join(scenario_folder, cav_id)
+                cav_path = scenario_folder / cav_id
 
-                yaml_files = sorted([str(file) for file in Path(cav_path).glob("*.yaml") if "additional" not in file.stem])
-
+                yaml_files: List[Path] = sorted(file for file in cav_path.glob("*.yaml") if "additional" not in file.stem)
                 # this timestamp is not ready
-                yaml_files = [x for x in yaml_files if not ("2021_08_20_21_10_24" in x and "000265" in x)]
-
-                timestamps = [Path(file).stem for file in yaml_files]  # 来自GPT: 把提取 timestamp 函数删掉了 (一行代码完事)
+                yaml_files = [
+                    x for x in yaml_files if not ("2021_08_20_21_10_24" in (path_str := str(x)) and "000265" in path_str)
+                ]
+                timestamps = [file.stem for file in yaml_files]  # 来自GPT: 把提取 timestamp 函数删掉了 (一行代码完事)
 
                 for timestamp in timestamps:
                     # 将加载数据路径的函数, 移到了一个单独的函数中 (如果因为后面的代码还需要 `lidar_file` 我一定会让 `_GetTimestampDataPath` 函数返回一个字典)
                     yaml_file, lidar_file, camera_files, depth_files = _GetTimestampDataPath(cav_path, timestamp)
-                    self.scenario_database[i][cav_id][timestamp] = {
-                        "yaml": yaml_file,
-                        "lidar": lidar_file,
-                        "cameras": camera_files,
-                        "depths": depth_files,
-                    }
+                    pfTimestampData = PFTimestampData(
+                        yaml=yaml_file, lidar=lidar_file, cameras=camera_files, depths=depth_files
+                    )
 
                     if getattr(self, "heterogeneous", False):
                         scenario_name = scenario_folder.stem
-
                         cav_modality = self.adaptor.reassign_cav_modality(self.modality_assignment[scenario_name][cav_id], j)
-
-                        self.scenario_database[i][cav_id][timestamp].update(
-                            {"modality_name": cav_modality, "lidar": self.adaptor.switch_lidar_channels(cav_modality, lidar_file)}
+                        pfTimestampData.modality_name, pfTimestampData.lidar = cav_modality, self.adaptor.switch_lidar_channels(
+                            cav_modality, lidar_file
                         )
 
                     # load extra data
                     for file_extension in self.add_data_extension:
                         file_name = os.path.join(cav_path, timestamp + "_" + file_extension)
+                        pfTimestampData.file_extension = file_name  # TODO: 在 PFTimestampData 中添加一个 `file_extension` 属性
+                        # self.scenario_database[i][cav_id][timestamp][file_extension] = file_name
 
-                        self.scenario_database[i][cav_id][timestamp][file_extension] = file_name
-
+                    self.scenario_database[i][cav_id][timestamp] = pfTimestampData
                 # Assume all cavs will have the same timestamps length. Thus
                 # we only need to calculate for the first vehicle in the
                 # scene.
@@ -241,10 +239,10 @@ class OPV2VBaseDataset(Dataset):
         """
         # we loop the accumulated length list to see get the scenario index
         scenario_index = self._GetScenarioIndex(idx)
-        scenario_database = self.scenario_database[scenario_index]
-
         # check the timestamp index
         timestamp_index = idx if scenario_index == 0 else idx - self.len_record[scenario_index - 1]
+
+        scenario_database = self.scenario_database[scenario_index]
         # retrieve the corresponding timestamp key
         # 来自GPT, 经过 GPT 优化后的代码, 可能可读性上不是很好 (TODO: 为这一行代码增加一些注释)
         timestamp_key = list(next(iter(scenario_database.values())).items())[timestamp_index][0]
