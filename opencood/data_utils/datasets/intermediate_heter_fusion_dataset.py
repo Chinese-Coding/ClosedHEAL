@@ -12,10 +12,12 @@ instead of using the cooperative label.
 
 import copy
 import math
+from typing import Dict
 
 import numpy as np
 import torch
 
+from opencood.data_utils.data_models.dataset_models import CAVData
 from opencood.data_utils.pre_processor import build_preprocessor
 from opencood.utils import box_utils as box_utils
 from opencood.utils.camera_utils import (
@@ -264,7 +266,7 @@ def getIntermediateheterFusionDataset(cls):
             return selected_cav_processed
 
         def __getitem__(self, idx):
-            base_data_dict = self.retrieve_base_data(idx)
+            base_data_dict: Dict[str, CAVData] = self.retrieve_base_data(idx)
             base_data_dict = add_noise_data_dict(base_data_dict, self.params["noise_setting"])
 
             processed_data_dict = {}
@@ -276,9 +278,9 @@ def getIntermediateheterFusionDataset(cls):
 
             # first find the ego vehicle's lidar pose
             for cav_id, cav_content in base_data_dict.items():
-                if cav_content["ego"]:
+                if cav_content.ego:
                     ego_id = cav_id
-                    ego_lidar_pose = cav_content["params"]["lidar_pose"]
+                    ego_lidar_pose = cav_content.params["lidar_pose"]
                     ego_cav_base = cav_content
                     break
 
@@ -310,8 +312,8 @@ def getIntermediateheterFusionDataset(cls):
             for cav_id, selected_cav_base in base_data_dict.items():
                 # check if the cav is within the communication range with ego
                 distance = math.sqrt(
-                    (selected_cav_base["params"]["lidar_pose"][0] - ego_lidar_pose[0]) ** 2
-                    + (selected_cav_base["params"]["lidar_pose"][1] - ego_lidar_pose[1]) ** 2
+                    (selected_cav_base.params["lidar_pose"][0] - ego_lidar_pose[0]) ** 2
+                    + (selected_cav_base.params["lidar_pose"][1] - ego_lidar_pose[1]) ** 2
                 )
 
                 # if distance is too far, we will just skip this agent
@@ -320,12 +322,12 @@ def getIntermediateheterFusionDataset(cls):
                     continue
 
                 # if modality not match
-                if self.adaptor.unmatched_modality(selected_cav_base["modality_name"]):
+                if self.adaptor.unmatched_modality(selected_cav_base.modality_name):
                     exclude_agent.append(cav_id)
                     continue
 
-                lidar_pose_clean_list.append(selected_cav_base["params"]["lidar_pose_clean"])
-                lidar_pose_list.append(selected_cav_base["params"]["lidar_pose"])  # 6dof pose
+                lidar_pose_clean_list.append(selected_cav_base.params["lidar_pose_clean"])
+                lidar_pose_list.append(selected_cav_base.params["lidar_pose"])  # 6dof pose
                 cav_id_list.append(cav_id)
 
             if len(cav_id_list) == 0:
@@ -382,8 +384,8 @@ def getIntermediateheterFusionDataset(cls):
 
             for _i, cav_id in enumerate(cav_id_list):
                 selected_cav_base = base_data_dict[cav_id]
-                modality_name = selected_cav_base["modality_name"]
-                sensor_type = self.sensor_type_dict[selected_cav_base["modality_name"]]
+                modality_name = selected_cav_base.modality_name
+                sensor_type = self.sensor_type_dict[modality_name]
 
                 # dynamic object center generator! for heterogeneous input
                 if not self.visualize:
@@ -399,9 +401,7 @@ def getIntermediateheterFusionDataset(cls):
 
                 if sensor_type == "lidar":
                     # 因为 `modality_name` 的类型不一定为 str (刚才调试了一下类型为 `np.str_`), 这里转换一下
-                    inputListModalities[str(modality_name)].append(
-                        selected_cav_processed[f"processed_features_{modality_name}"]
-                    )
+                    inputListModalities[modality_name].append(selected_cav_processed[f"processed_features_{modality_name}"])
                 elif sensor_type == "camera":
                     eval(f"input_list_{modality_name}").append(selected_cav_processed[f"image_inputs_{modality_name}"])
                 else:
@@ -477,7 +477,7 @@ def getIntermediateheterFusionDataset(cls):
 
             for modality_name in self.modality_name_list:
                 if self.sensor_type_dict[modality_name] == "lidar":
-                    merged_feature_dict = merge_features_to_dict(inputListModalities[str(modality_name)])
+                    merged_feature_dict = merge_features_to_dict(inputListModalities[modality_name])
                     processed_data_dict["ego"].update({f"input_{modality_name}": merged_feature_dict})  # maybe None
                 elif self.sensor_type_dict[modality_name] == "camera":
                     merged_image_inputs_dict = merge_features_to_dict(eval(f"input_list_{modality_name}"), merge="stack")

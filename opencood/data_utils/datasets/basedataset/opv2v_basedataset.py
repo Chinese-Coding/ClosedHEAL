@@ -16,7 +16,7 @@ from torch.utils.data import Dataset
 
 import opencood.utils.pcd_utils as pcd_utils
 from opencood.data_utils.augmentor.data_augmentor import DataAugmentor
-from opencood.data_utils.data_models.dataset_models import PFTimestampData
+from opencood.data_utils.data_models.dataset_models import PFTimestampData, CAVData
 from opencood.data_utils.post_processor import build_postprocessor
 from opencood.data_utils.pre_processor import build_preprocessor
 from opencood.hypes_yaml.yaml_utils import load_yaml
@@ -246,19 +246,21 @@ class OPV2VBaseDataset(Dataset):
         # retrieve the corresponding timestamp key
         # 来自GPT, 经过 GPT 优化后的代码, 可能可读性上不是很好 (TODO: 为这一行代码增加一些注释)
         timestamp_key = list(next(iter(scenario_database.values())).items())[timestamp_index][0]
-        data = {}
+        data: Dict[str, CAVData] = {}
         # load files for all CAVs
         for cav_id, cav_content in scenario_database.items():
-            cavData = {"ego": cav_content["ego"]}
-            cavData["params"] = _LoadParams(cav_content[timestamp_key]["yaml"])
-            cavData.update(self._LoadCameraAndDepth(cav_content, timestamp_key))
+            cavData = CAVData(
+                ego=cav_content["ego"],
+                params=_LoadParams(cav_content[timestamp_key]["yaml"]),
+                **(self._LoadCameraAndDepth(cav_content, timestamp_key)),
+            )
 
             # load lidar file
             if self.load_lidar_file or self.visualize:
-                cavData["lidar_np"] = pcd_utils.pcd_to_np(cav_content[timestamp_key]["lidar"])
+                cavData.lidar_np = pcd_utils.pcd_to_np(cav_content[timestamp_key].lidar)
 
             if getattr(self, "heterogeneous", False):
-                cavData["modality_name"] = cav_content[timestamp_key]["modality_name"]
+                cavData.modality_name = cav_content[timestamp_key].modality_name
 
             for file_extension in self.add_data_extension:
                 # if not find in the current directory
