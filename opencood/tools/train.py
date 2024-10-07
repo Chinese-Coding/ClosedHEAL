@@ -6,12 +6,13 @@ import argparse
 import os
 import statistics
 
-import opencood.hypes_yaml.yaml_utils as yaml_utils
 import torch
-from opencood.data_utils.datasets import build_dataset
-from opencood.tools import train_utils
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
+
+import opencood.hypes_yaml.yaml_utils as yaml_utils
+from opencood.data_utils.datasets import build_dataset
+from opencood.tools import train_utils
 
 
 def train_parser():
@@ -21,6 +22,83 @@ def train_parser():
     parser.add_argument("--fusion_method", "-f", default="intermediate", help="passed to inference.")
     opt = parser.parse_args()
     return opt
+
+
+def _BuildModules(hypes):
+    model = train_utils.create_model(hypes)
+    criterion = train_utils.create_loss(hypes)  # define the loss
+    optimizer = train_utils.setup_optimizer(hypes, model)  # optimizer setup
+    scheduler = train_utils.setup_lr_schedular(hypes, optimizer)
+    return model, criterion, optimizer, scheduler
+
+
+def _LoadModules(model_dir, hypes, model, optimizer):
+    if model_dir:
+        saved_path = model_dir
+        init_epoch, model = train_utils.load_saved_model(saved_path, model)
+        lowest_val_epoch = init_epoch
+    else:
+        saved_path = train_utils.setup_train(hypes)
+        init_epoch, lowest_val_epoch = 0, -1
+
+    scheduler = train_utils.setup_lr_schedular(hypes, optimizer, init_epoch)
+    return saved_path, init_epoch, lowest_val_epoch, model, scheduler
+
+
+def _TrainOneEpoch(dataloader, device, epoch, writer, hypes, supervise_signle_flag, model, optimizer, criterion):
+    length = len(dataloader)
+    for i, batch_data in enumerate(dataloader):
+        if batch_data is None or batch_data["ego"]["object_bbx_mask"].sum() == 0:
+            continue
+        model.zero_grad()
+        optimizer.zero_grad()
+        batch_data = train_utils.to_device(batch_data, device)
+        batch_data["ego"]["epoch"] = epoch
+        output_dict = model(batch_data["ego"])
+
+        final_loss = criterion(output_dict, batch_data["ego"]["label_dict"])
+        criterion.logging(epoch, i, length, writer)
+
+        if supervise_signle_flag:
+            final_loss += criterion(output_dict, batch_data["ego"]["label_dict_single"], suffix="_single") * hypes[
+                "train_params"
+            ].get("signle_weight", 1)
+            criterion.logging(epoch, i, length, writer, suffix="_single")
+
+        final_loss.backward()
+        optimizer.step()
+
+
+def _EvalOneEpoch(dataloader, device, epoch, writer, model, criterion):
+    valid_ave_loss = []
+    model.eval()  # 将 eval 模式放到循环外
+    with torch.no_grad():  # 全局使用 no_grad(), 提高效率
+        for i, batch_data in enumerate(dataloader):
+            if batch_data is None:
+                continue
+            batch_data = train_utils.to_device(batch_data, device)
+            batch_data["ego"]["epoch"] = epoch
+            output_dict = model(batch_data["ego"])
+
+            final_loss = criterion(output_dict, batch_data["ego"]["label_dict"])
+            print(f"val loss {final_loss:.3f}")
+            valid_ave_loss.append(final_loss.item())
+    valid_ave_loss = statistics.mean(valid_ave_loss)
+    print(f"At epoch {epoch}, the validation loss is {valid_ave_loss:.6f}")
+    writer.add_scalar("Validate_loss", valid_ave_loss, epoch)
+    return valid_ave_loss
+
+
+def _SaveModel(lowest_val_loss, valid_ave_loss, lowest_val_epoch, epoch, saved_path, model):
+    if valid_ave_loss < lowest_val_loss:
+        lowest_val_loss, best_model_path = valid_ave_loss, os.path.join(saved_path, f"net_epoch_bestval_at{epoch+1}.pth")
+        torch.save(model.state_dict(), best_model_path)
+
+        previous_model_path = os.path.join(saved_path, f"net_epoch_bestval_at{lowest_val_epoch}.pth")
+        if lowest_val_epoch != -1 and os.path.exists(previous_model_path):
+            os.remove(previous_model_path)
+        lowest_val_epoch = epoch + 1
+    return lowest_val_loss, lowest_val_epoch
 
 
 def main():
@@ -52,39 +130,17 @@ def main():
         prefetch_factor=2,
     )
 
-    print("Creating Model")
-    model = train_utils.create_model(hypes)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # record lowest validation loss checkpoint.
-    lowest_val_loss = 1e5
-    lowest_val_epoch = -1
+    lowest_val_loss, lowest_val_epoch = 1e5, -1
 
-    # define the loss
-    criterion = train_utils.create_loss(hypes)
-
-    # optimizer setup
-    optimizer = train_utils.setup_optimizer(hypes, model)
-    # lr scheduler setup
-
+    print("Creating Model")
+    model, criterion, optimizer, scheduler = _BuildModules(hypes)
     # if we want to train from last checkpoint.
-    if opt.model_dir:
-        saved_path = opt.model_dir
-        init_epoch, model = train_utils.load_saved_model(saved_path, model)
-        lowest_val_epoch = init_epoch
-        scheduler = train_utils.setup_lr_schedular(hypes, optimizer, init_epoch=init_epoch)
-        print(f"resume from {init_epoch} epoch.")
+    saved_path, init_epoch, lowest_val_epoch, model, scheduler = _LoadModules(opt.model_dir, hypes, model, optimizer)
 
-    else:
-        init_epoch = 0
-        # if we train the model from scratch, we need to create a folder
-        # to save the model,
-        saved_path = train_utils.setup_train(hypes)
-        scheduler = train_utils.setup_lr_schedular(hypes, optimizer)
-
-    # we assume gpu is necessary
-    if torch.cuda.is_available():
-        model.to(device)
+    model.to(device)
 
     # record training
     writer = SummaryWriter(saved_path)
@@ -105,67 +161,19 @@ def main():
             model.model_train_init()
         except:
             print("No model_train_init function")
-        for i, batch_data in enumerate(train_loader):
-            if batch_data is None or batch_data["ego"]["object_bbx_mask"].sum() == 0:
-                continue
-            model.zero_grad()
-            optimizer.zero_grad()
-            batch_data = train_utils.to_device(batch_data, device)
-            batch_data["ego"]["epoch"] = epoch
-            ouput_dict = model(batch_data["ego"])
 
-            final_loss = criterion(ouput_dict, batch_data["ego"]["label_dict"])
-            criterion.logging(epoch, i, len(train_loader), writer)
-
-            if supervise_single_flag:
-                final_loss += criterion(ouput_dict, batch_data["ego"]["label_dict_single"], suffix="_single") * hypes[
-                    "train_params"
-                ].get("single_weight", 1)
-                criterion.logging(epoch, i, len(train_loader), writer, suffix="_single")
-
-            # back-propagation
-            final_loss.backward()
-            optimizer.step()
-
-            # torch.cuda.empty_cache()  # it will destroy memory buffer
+        _TrainOneEpoch(train_loader, device, epoch, writer, hypes, supervise_single_flag, model, optimizer, criterion)
 
         if epoch % hypes["train_params"]["save_freq"] == 0:
             torch.save(model.state_dict(), os.path.join(saved_path, "net_epoch%d.pth" % (epoch + 1)))
 
         if epoch % hypes["train_params"]["eval_freq"] == 0:
-            valid_ave_loss = []
+            valid_ave_loss = _EvalOneEpoch(val_loader, device, epoch, writer, model, criterion)
+            lowest_val_loss, lowest_val_epoch = _SaveModel(
+                lowest_val_loss, valid_ave_loss, lowest_val_epoch, epoch, saved_path, model
+            )
 
-            with torch.no_grad():
-                for i, batch_data in enumerate(val_loader):
-                    if batch_data is None:
-                        continue
-                    model.zero_grad()
-                    optimizer.zero_grad()
-                    model.eval()
-
-                    batch_data = train_utils.to_device(batch_data, device)
-                    batch_data["ego"]["epoch"] = epoch
-                    ouput_dict = model(batch_data["ego"])
-
-                    final_loss = criterion(ouput_dict, batch_data["ego"]["label_dict"])
-                    print(f"val loss {final_loss:.3f}")
-                    valid_ave_loss.append(final_loss.item())
-
-            valid_ave_loss = statistics.mean(valid_ave_loss)
-            print("At epoch %d, the validation loss is %f" % (epoch, valid_ave_loss))
-            writer.add_scalar("Validate_Loss", valid_ave_loss, epoch)
-
-            # lowest val loss
-            if valid_ave_loss < lowest_val_loss:
-                lowest_val_loss = valid_ave_loss
-                torch.save(model.state_dict(), os.path.join(saved_path, "net_epoch_bestval_at%d.pth" % (epoch + 1)))
-                if lowest_val_epoch != -1 and os.path.exists(
-                    os.path.join(saved_path, "net_epoch_bestval_at%d.pth" % (lowest_val_epoch))
-                ):
-                    os.remove(os.path.join(saved_path, "net_epoch_bestval_at%d.pth" % (lowest_val_epoch)))
-                lowest_val_epoch = epoch + 1
-
-        scheduler.step(epoch)
+        scheduler.step()
 
         opencood_train_dataset.dataset.reinitialize()  # WARNING: 如果想要全部数据进行训练需要修改这里
 
