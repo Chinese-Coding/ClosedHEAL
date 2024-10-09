@@ -290,6 +290,7 @@ class LiftSplatShoot(nn.Module):
 
 
 class LiftSplatShootVoxel(LiftSplatShoot):
+    # 搜索了一下这个方法怎么没有配置文件在用呢?
     def voxel_pooling(self, geom_feats, x):
         # geom_feats: B x N x D x H x W x 3 (4 x 6 x 41 x 16 x 22 x 3), D is discretization in "UD" or "LID"
         # x: B x N x D x fH x fW x C(4 x 6 x 41 x 16 x 22 x 64), D is num_bins

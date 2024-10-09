@@ -1,6 +1,6 @@
-""" Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
+"""Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
 
-HEAL: An Extensible Framework for Open Heterogeneous Collaborative Perception 
+HEAL: An Extensible Framework for Open Heterogeneous Collaborative Perception
 """
 
 import importlib
@@ -43,6 +43,7 @@ class HeterPyramidSingle(nn.Module):
 
             # build encoder
             setattr(self, f"encoder_{modality_name}", encoder_class(model_setting["encoder_args"]))
+            print(type(getattr(self, f"encoder_{modality_name}")))
             # depth supervision for camera
             if model_setting["encoder_args"].get("depth_supervision", False):
                 setattr(self, f"depth_supervision_{modality_name}", True)
@@ -61,6 +62,7 @@ class HeterPyramidSingle(nn.Module):
                 )
 
             setattr(self, f"aligner_{modality_name}", AlignNet(model_setting["aligner_args"]))
+            print(type(getattr(self, f"aligner_{modality_name}")))
 
             if args.get("fix_encoder", False):
                 self.fix_modules += [f"encoder_{modality_name}", f"backbone_{modality_name}"]
@@ -103,9 +105,16 @@ class HeterPyramidSingle(nn.Module):
         assert len(modality_name) == 1
         modality_name = modality_name[0].lstrip("inputs_")
 
+        # TODO: encoder 的作用是: 将图片转化为体素或者直接将点云转换为体素特征
+        #       backbone 的作用是: 提取体素特征, 并转换为 bev 特征:
+        #       aligner 的作用呢? 是对齐吗?
         feature = eval(f"self.encoder_{modality_name}")(data_dict, modality_name)
+        print(type(feature), feature.shape)  # m2shape: (4, 128, 256, 256)
         feature = eval(f"self.backbone_{modality_name}")({"spatial_features": feature})["spatial_features_2d"]
-        feature = eval(f"self.aligner_{modality_name}")(feature)
+        print(type(feature), feature.shape)  # m2shape: (4, 64, 128, 128)
+        # TODO: 去掉这个 `aligner` 也可以正常训练, 这一层的扎作用是什么呢?
+        # feature = eval(f"self.aligner_{modality_name}")(feature)
+        print(type(feature), feature.shape)  # m2shape: (4, 64, 128, 128)
 
         if self.sensor_type_dict[modality_name] == "camera":
             # should be padding. Instead of masking

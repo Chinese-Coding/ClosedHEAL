@@ -330,7 +330,7 @@ class ConvNeXtBlock(nn.Module):
 
     Args:
         dim (int): Number of input channels.
-        drop_path (float): Stochastic depth rate. Default: 0.0
+        drop_path (float): Stochastic depth rate. Default: 0.0 随机深度丢弃率，用于在训练时进行随机路径丢弃以防止过拟合。
         layer_scale_init_value (float): Init value for Layer Scale. Default: 1e-6.
     """
 
@@ -347,7 +347,7 @@ class ConvNeXtBlock(nn.Module):
         self.act = nn.GELU()
         self.pwconv2 = nn.Linear(4 * dim, dim)
         self.gamma = (
-            nn.Parameter(layer_scale_init_value * torch.ones((dim)), requires_grad=True) if layer_scale_init_value > 0 else None
+            nn.Parameter(layer_scale_init_value * torch.ones(dim), requires_grad=True) if layer_scale_init_value > 0 else None
         )
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
 
@@ -371,6 +371,11 @@ class ConvNeXtBlock(nn.Module):
 
 
 class ConvNeXt(nn.Module):
+    """
+    来自GPT: ConvNeXt 由 Facebook Research 提出，旨在通过对传统卷积网络进行现代化改进，
+    使其在多个视觉任务中与最先进的 Transformer 模型相竞争。
+    """
+
     def __init__(self, args):
         super().__init__()
         dim = args["dim"]

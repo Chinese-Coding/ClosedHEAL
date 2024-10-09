@@ -1,6 +1,6 @@
-""" Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
+"""Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
 
-HEAL: An Extensible Framework for Open Heterogeneous Collaborative Perception 
+HEAL: An Extensible Framework for Open Heterogeneous Collaborative Perception
 """
 
 import importlib
@@ -151,8 +151,11 @@ class HeterPyramidCollab(nn.Module):
             if modality_name not in modality_count_dict:
                 continue
             feature = eval(f"self.encoder_{modality_name}")(data_dict, modality_name)
+            print(type(feature), feature.shape)  # shape: (6, 64, 256, 512)
             feature = eval(f"self.backbone_{modality_name}")({"spatial_features": feature})["spatial_features_2d"]
+            print(type(feature), feature.shape)  # shape: (6, 64, 128, 256)
             feature = eval(f"self.aligner_{modality_name}")(feature)
+            print(type(feature), feature.shape)  # shape: (6, 64, 128, 256)
             modality_feature_dict[modality_name] = feature
 
         """
