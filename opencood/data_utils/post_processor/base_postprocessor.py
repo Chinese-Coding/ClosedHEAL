@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 import torch
 
+from opencood.data_utils.data_models.dataset_models import CAVData
 from opencood.utils import box_utils
 from opencood.utils import common_utils
 from opencood.utils.transformation_utils import x1_to_x2
@@ -469,7 +470,10 @@ class BasePostprocessor(object):
         output_dict = {}
         filter_range = self.params["anchor_args"]["cav_lidar_range"]  # if self.train else GT_RANGE_OPV2V
         inf_filter_range = [-1e5, -1e5, -1e5, 1e5, 1e5, 1e5]
-        visibility_map = np.asarray(cv2.cvtColor(cav_contents[0]["bev_visibility.png"], cv2.COLOR_BGR2GRAY))
+        if isinstance(cav_contents[0], CAVData):
+            visibility_map = np.asarray(cv2.cvtColor(cav_contents[0].file_extensions["bev_visibility.png"], cv2.COLOR_BGR2GRAY))
+        else:
+            visibility_map = np.asarray(cv2.cvtColor(cav_contents[0]["bev_visibility.png"], cv2.COLOR_BGR2GRAY))
         ego_lidar_pose = cav_contents[0]["params"]["lidar_pose_clean"]
 
         # 1-time filter: in ego coordinate, use visibility map to filter.

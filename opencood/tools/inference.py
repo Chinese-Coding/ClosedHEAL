@@ -26,7 +26,7 @@ def test_parser():
         "--fusion_method", type=str, default="intermediate", help="no, no_w_uncertainty, late, early or intermediate"
     )
     parser.add_argument("--save_vis_interval", type=int, default=40, help="interval of saving visualization")
-    parser.add_argument("--save_npy", action="store_true", help="whether to save prediction and gt result" "in npy file")
+    parser.add_argument("--save_npy", action="store_true", help="whether to save prediction and gt resultin npy file")
     parser.add_argument("--range", type=str, default="102.4,102.4", help="detection range is [-102.4, +102.4, -102.4, +102.4]")
     parser.add_argument("--no_score", action="store_true", help="whether print the score of prediction")
     parser.add_argument("--note", default="", type=str, help="any other thing?")
@@ -109,7 +109,7 @@ def main():
         opencood_dataset,
         batch_size=1,
         num_workers=4,
-        collate_fn=opencood_dataset.collate_batch_test,
+        collate_fn=opencood_dataset.dataset.collate_batch_test,
         shuffle=False,
         pin_memory=False,
         drop_last=False,
@@ -144,9 +144,7 @@ def main():
             elif opt.fusion_method == "single":
                 infer_result = inference_utils.inference_no_fusion(batch_data, model, opencood_dataset, single_gt=True)
             else:
-                raise NotImplementedError(
-                    "Only single, no, no_w_uncertainty, early, late and intermediate" "fusion is supported."
-                )
+                raise NotImplementedError("Only single, no, no_w_uncertainty, early, late and intermediatefusion is supported.")
 
             pred_box_tensor = infer_result["pred_box_tensor"]
             gt_box_tensor = infer_result["gt_box_tensor"]

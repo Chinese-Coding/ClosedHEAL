@@ -8,6 +8,8 @@ from collections import OrderedDict
 
 import numpy as np
 import torch
+from torch.utils.data import Subset
+
 from opencood.utils.box_utils import create_bbx, project_box3d, nms_rotated
 from opencood.utils.camera_utils import indices_to_depth
 from opencood.utils.common_utils import torch_tensor_to_numpy
@@ -136,7 +138,8 @@ def inference_early_fusion(batch_data, model, dataset):
     output_dict = OrderedDict()
     cav_content = batch_data["ego"]
     output_dict["ego"] = model(cav_content)
-
+    if isinstance(dataset, Subset):
+        dataset = dataset.dataset
     pred_box_tensor, pred_score, gt_box_tensor = dataset.post_process(batch_data, output_dict)
 
     return_dict = {"pred_box_tensor": pred_box_tensor, "pred_score": pred_score, "gt_box_tensor": gt_box_tensor}

@@ -191,7 +191,7 @@ def downsample_lidar_minimum(pcd_np_list):
     pcd_np_list : list
         Downsampled point clouds.
     """
-    minimum = np.Inf
+    minimum = np.inf  # 在 NumPy 2.0 中, 使用 `np.inf` 对原先的 `np.Inf` 进行了替代
 
     for i in range(len(pcd_np_list)):
         num = pcd_np_list[i].shape[0]

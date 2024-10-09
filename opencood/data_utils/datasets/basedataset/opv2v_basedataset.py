@@ -49,7 +49,7 @@ def _LoadParams(yamlFile):
 
 def _ReplaceWithAdditional(filePath: str):
     """Replace the main folder with 'additional' if file is not found."""
-    return Path(filePath).with_name(
+    return (
         filePath.replace("train", "additional/train")
         .replace("validate", "additional/validate")
         .replace("test", "additional/test")
@@ -171,7 +171,9 @@ class OPV2VBaseDataset(Dataset):
                     # load extra data
                     for file_extension in self.add_data_extension:
                         file_name = os.path.join(cav_path, timestamp + "_" + file_extension)
-                        pfTimestampData.file_extension = file_name  # TODO: 在 PFTimestampData 中添加一个 `file_extension` 属性
+                        pfTimestampData.file_extensions[file_extension] = (
+                            file_name  # TODO: 在 PFTimestampData 中添加一个 `file_extension` 属性
+                        )
                         # self.scenario_database[i][cav_id][timestamp][file_extension] = file_name
 
                     self.scenario_database[i][cav_id][timestamp] = pfTimestampData
@@ -258,11 +260,12 @@ class OPV2VBaseDataset(Dataset):
             for file_extension in self.add_data_extension:
                 # if not find in the current directory
                 # go to additional folder
-                filePath = cav_content[timestamp_key][file_extension]
+                filePath = cav_content[timestamp_key].file_extensions[file_extension]
                 if not os.path.exists(filePath):
                     filePath = _ReplaceWithAdditional(filePath)
-
-                cavData[file_extension] = load_yaml(filePath) if ".yaml" in file_extension else cv2.imread(filePath)
+                cavData.file_extensions[file_extension] = (
+                    load_yaml(filePath) if ".yaml" in file_extension else cv2.imread(filePath)
+                )
             data[cav_id] = cavData
         return data
 

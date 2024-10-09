@@ -3,7 +3,7 @@ from typing import List, Optional, Dict
 
 import numpy as np
 from PIL import Image
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 """
 PF: path for
@@ -16,6 +16,7 @@ class PFTimestampData(BaseModel):
     cameras: List[Path]
     depths: List[Path]
     modality_name: Optional[str] = None
+    file_extensions: Dict[str, str] = Field(default_factory=dict)
 
     def __getitem__(self, key):
         if key in self.__dict__:
@@ -40,7 +41,7 @@ class CAVData(BaseModel):
 
     lidar_np: Optional[np.ndarray] = None
     modality_name: Optional[str] = None
-    file_extension: Optional[Dict] = None
+    file_extensions: Dict = Field(default_factory=dict)
 
     def __getitem__(self, key):
         if key in self.__dict__:

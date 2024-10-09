@@ -308,6 +308,8 @@ year={2024},
 CUDA_LAUNCH_BLOCKING=1 python opencood/tools/train.py -y None --model_dir opencood/logs/HEAL_m1_based/stage1/m1_base
 CUDA_LAUNCH_BLOCKING=1 TORCH_USE_CUDA_DSA python opencood/tools/train.py -y None --model_dir opencood/logs/HEAL_m1_based/stage1/m1_base
 
-PYTHONPATH=/home/zfq/Desktop/OriginHEAL:$PYTHONPATH ppython opencood/tools/train.py -y None --model_dir opencood/logs/HEAL_m1_based/stage1/m1_bas 
+PYTHONPATH=/home/zfq/Desktop/OriginHEAL:$PYTHONPATH ppython opencood/tools/train.py -y None --model_dir opencood/logs/HEAL_m1_based/stage1/m1_base
+ 
+PYTHONPATH=/home/zfq/Desktop/OriginHEAL:$PYTHONPATH python opencood/tools/train.py -y None --model_dir opencood/logs/HEAL_m1_based/stage2/m2_alignto_m1
 
 ```
