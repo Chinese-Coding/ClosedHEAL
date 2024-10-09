@@ -65,17 +65,10 @@ class OPV2VBaseDataset(Dataset):
 
         self.pre_processor = build_preprocessor(params["preprocess"], train)
         self.post_processor = build_postprocessor(params["postprocess"], train)
-        if "data_augment" in params:  # late and early
-            self.data_augmentor = DataAugmentor(params["data_augment"], train)
-        else:  # intermediate
-            self.data_augmentor = None
 
-        if self.train:
-            root_dir = params["root_dir"]
-        else:
-            root_dir = params["validate_dir"]
-        self.root_dir = root_dir
+        self.data_augmentor = DataAugmentor(params["data_augment"], train) if "data_augment" in params else None
 
+        root_dir = params["root_dir"] if self.train else params["validate_dir"]
         print("Dataset dir:", root_dir)
 
         # 来自GPT: 冗余的默认值处理
