@@ -141,12 +141,13 @@ class HeterPyramidCollab(nn.Module):
     def forward(self, data_dict):
         output_dict = {"pyramid": "collab"}
         agent_modality_list = data_dict["agent_modality_list"]
+        print(agent_modality_list)
         affine_matrix = normalize_pairwise_tfm(data_dict["pairwise_t_matrix"], self.H, self.W, self.fake_voxel_size)
         record_len = data_dict["record_len"]
         # print(agent_modality_list)
         modality_count_dict = Counter(agent_modality_list)
         modality_feature_dict = {}
-
+        print(len(self.modality_name_list))
         for modality_name in self.modality_name_list:
             if modality_name not in modality_count_dict:
                 continue
@@ -184,7 +185,7 @@ class HeterPyramidCollab(nn.Module):
             feat_idx = counting_dict[modality_name]
             heter_feature_2d_list.append(modality_feature_dict[modality_name][feat_idx])
             counting_dict[modality_name] += 1
-
+        print(f"{len(heter_feature_2d_list)=}")
         heter_feature_2d = torch.stack(heter_feature_2d_list)
 
         if self.compress:
@@ -199,7 +200,7 @@ class HeterPyramidCollab(nn.Module):
 
         if self.shrink_flag:
             fused_feature = self.shrink_conv(fused_feature)
-
+        print(f"进入检测头 {fused_feature.shape}")  # shape: (2, 256, 128, 256)
         cls_preds = self.cls_head(fused_feature)
         reg_preds = self.reg_head(fused_feature)
         dir_preds = self.dir_head(fused_feature)
