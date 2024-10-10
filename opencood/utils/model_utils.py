@@ -20,46 +20,45 @@ def unfix_bn(m):
         m.train()
 
 
-def has_trainable_params(module: torch.nn.Module) -> bool:
-    any_require_grad = any(p.requires_grad for p in module.parameters())
-    any_bn_in_train_mode = any(
-        m.training
+def _CheckBatchNormMode(module: torch.nn.Module, is_training: bool) -> bool:
+    return any(
+        m.training == is_training
         for m in module.modules()
         if isinstance(m, (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d, torch.nn.BatchNorm3d))
     )
-    return any_require_grad or any_bn_in_train_mode
+
+
+def has_trainable_params(module: torch.nn.Module) -> bool:
+    return any(p.requires_grad for p in module.parameters()) or _CheckBatchNormMode(module, is_training=True)
 
 
 def has_untrainable_params(module: torch.nn.Module) -> bool:
-    any_not_require_grad = any((not p.requires_grad) for p in module.parameters())
-    any_bn_in_eval_mode = any(
-        (not m.training)
-        for m in module.modules()
-        if isinstance(m, (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d, torch.nn.BatchNorm3d))
-    )
-    return any_not_require_grad or any_bn_in_eval_mode
+    return any(not p.requires_grad for p in module.parameters()) or _CheckBatchNormMode(module, is_training=False)
 
 
 def check_trainable_module(model):
-    appeared_module_list = []
-    has_trainable_list = []
-    has_untrainable_list = []
-    for name, module in model.named_modules():
-        if (
-            any([name.startswith(appeared_module_name) for appeared_module_name in appeared_module_list]) or name == ""
-        ):  # the whole model has name ''
-            continue
-        appeared_module_list.append(name)
+    appeared_module_set = set()
+    has_trainable_list, has_untrainable_list = [], []
 
-        if has_trainable_params(module):
+    for name, module in model.named_modules():
+        if name == "" or any(name.startswith(mod_name) for mod_name in appeared_module_set):
+            continue
+
+        appeared_module_set.add(name)
+
+        # 只遍历一次参数，记录可训练和不可训练的模块
+        trainable_found = has_trainable_params(module)
+        untrainable_found = has_untrainable_params(module)
+
+        if trainable_found:
             has_trainable_list.append(name)
-        if has_untrainable_params(module):
+        if untrainable_found:
             has_untrainable_list.append(name)
 
     print("=========Those modules have trainable component=========")
-    print(*has_trainable_list, sep="\n", end="\n\n")
+    print("\n".join(has_trainable_list), end="\n\n")
     print("=========Those modules have untrainable component=========")
-    print(*has_untrainable_list, sep="\n", end="\n\n")
+    print("\n".join(has_untrainable_list), end="\n\n")
 
 
 def weight_init(m):

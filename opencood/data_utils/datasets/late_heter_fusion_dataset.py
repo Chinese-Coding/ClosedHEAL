@@ -9,6 +9,7 @@ from collections import OrderedDict
 
 import numpy as np
 import torch
+
 from opencood.data_utils.pre_processor import build_preprocessor
 from opencood.utils import box_utils as box_utils
 from opencood.utils.camera_utils import (
@@ -275,28 +276,24 @@ def getLateheterFusionDataset(cls):
                     post_rots.append(post_rot)
                     post_trans.append(post_tran)
 
-                selected_cav_processed.update(
-                    {
-                        f"image_inputs_{modality_name}": {
-                            "imgs": torch.stack(imgs),  # [N, 3or4, H, W]
-                            "intrins": torch.stack(intrins),
-                            "extrinsics": torch.stack(extrinsics),
-                            "rots": torch.stack(rots),
-                            "trans": torch.stack(trans),
-                            "post_rots": torch.stack(post_rots),
-                            "post_trans": torch.stack(post_trans),
-                        }
+                selected_cav_processed.update({
+                    f"image_inputs_{modality_name}": {
+                        "imgs": torch.stack(imgs),  # [N, 3or4, H, W]
+                        "intrins": torch.stack(intrins),
+                        "extrinsics": torch.stack(extrinsics),
+                        "rots": torch.stack(rots),
+                        "trans": torch.stack(trans),
+                        "post_rots": torch.stack(post_rots),
+                        "post_trans": torch.stack(post_trans),
                     }
-                )
+                })
 
-            selected_cav_processed.update(
-                {
-                    "object_bbx_center": object_bbx_center,
-                    "object_bbx_mask": object_bbx_mask,
-                    "object_ids": object_ids,
-                    "modality_name": modality_name,
-                }
-            )
+            selected_cav_processed.update({
+                "object_bbx_center": object_bbx_center,
+                "object_bbx_mask": object_bbx_mask,
+                "object_ids": object_ids,
+                "modality_name": modality_name,
+            })
 
             # generate targets label
             label_dict = self.post_processor.generate_label(
@@ -348,14 +345,12 @@ def getLateheterFusionDataset(cls):
             # for centerpoint
             label_torch_dict.update({"object_bbx_center": object_bbx_center, "object_bbx_mask": object_bbx_mask})
 
-            output_dict["ego"].update(
-                {
-                    "object_bbx_center": object_bbx_center,
-                    "object_bbx_mask": object_bbx_mask,
-                    "anchor_box": torch.from_numpy(self.anchor_box),
-                    "label_dict": label_torch_dict,
-                }
-            )
+            output_dict["ego"].update({
+                "object_bbx_center": object_bbx_center,
+                "object_bbx_mask": object_bbx_mask,
+                "anchor_box": torch.from_numpy(self.anchor_box),
+                "label_dict": label_torch_dict,
+            })
             if self.visualize:
                 origin_lidar = np.array(downsample_lidar_minimum(pcd_np_list=origin_lidar))
                 origin_lidar = torch.from_numpy(origin_lidar)
@@ -447,19 +442,17 @@ def getLateheterFusionDataset(cls):
                     post_trans_batch = [cav_content[f"image_inputs_{modality_name}"]["post_trans"]]
                     post_rots_batch = [cav_content[f"image_inputs_{modality_name}"]["post_rots"]]
 
-                    output_dict[cav_id].update(
-                        {
-                            f"inputs_{modality_name}": {
-                                "imgs": torch.stack(imgs_batch),
-                                "rots": torch.stack(rots_batch),
-                                "trans": torch.stack(trans_batch),
-                                "intrins": torch.stack(intrins_batch),
-                                "extrinsics": torch.stack(extrinsics_batch),
-                                "post_trans": torch.stack(post_trans_batch),
-                                "post_rots": torch.stack(post_rots_batch),
-                            }
+                    output_dict[cav_id].update({
+                        f"inputs_{modality_name}": {
+                            "imgs": torch.stack(imgs_batch),
+                            "rots": torch.stack(rots_batch),
+                            "trans": torch.stack(trans_batch),
+                            "intrins": torch.stack(intrins_batch),
+                            "extrinsics": torch.stack(extrinsics_batch),
+                            "post_trans": torch.stack(post_trans_batch),
+                            "post_rots": torch.stack(post_rots_batch),
                         }
-                    )
+                    })
 
                 # label dictionary
                 label_torch_dict = self.post_processor.collate_batch([cav_content["label_dict"]])
@@ -474,17 +467,15 @@ def getLateheterFusionDataset(cls):
                     np.array(cav_content["transformation_matrix_clean"])
                 ).float()
 
-                output_dict[cav_id].update(
-                    {
-                        "object_bbx_center": object_bbx_center,
-                        "object_bbx_mask": object_bbx_mask,
-                        "label_dict": label_torch_dict,
-                        "object_ids": object_ids,
-                        "transformation_matrix": transformation_matrix_torch,
-                        "transformation_matrix_clean": transformation_matrix_clean_torch,
-                        "modality_name": modality_name,
-                    }
-                )
+                output_dict[cav_id].update({
+                    "object_bbx_center": object_bbx_center,
+                    "object_bbx_mask": object_bbx_mask,
+                    "label_dict": label_torch_dict,
+                    "object_ids": object_ids,
+                    "transformation_matrix": transformation_matrix_torch,
+                    "transformation_matrix_clean": transformation_matrix_clean_torch,
+                    "modality_name": modality_name,
+                })
 
                 if self.visualize:
                     origin_lidar = np.array(downsample_lidar_minimum(pcd_np_list=origin_lidar))

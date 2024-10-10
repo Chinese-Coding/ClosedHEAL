@@ -29,29 +29,38 @@ def backup_script(full_path, folders_to_save=["models", "data_utils", "utils", "
 
 
 def check_missing_key(model_state_dict, ckpt_state_dict):
-    checkpoint_keys = set(ckpt_state_dict.keys())
-    model_keys = set(model_state_dict.keys())
+    checkpoint_keys, model_keys = set(ckpt_state_dict.keys()), set(model_state_dict.keys())
+    missing_keys, extra_keys = model_keys - checkpoint_keys, checkpoint_keys - model_keys
 
-    missing_keys = model_keys - checkpoint_keys
-    extra_keys = checkpoint_keys - model_keys
-
-    missing_key_modules = set([keyname.split(".")[0] for keyname in missing_keys])
-    extra_key_modules = set([keyname.split(".")[0] for keyname in extra_keys])
-
-    print("------ Loading Checkpoint ------")
-    if len(missing_key_modules) == 0 and len(extra_key_modules) == 0:
+    if not missing_keys and not extra_keys:
+        print("No missing or extra keys found. Loading checkpoint is consistent with the model.")
         return
 
-    print("Missing keys from ckpt:")
-    print(*missing_key_modules, sep="\n", end="\n\n")
-    # print(*missing_keys,sep='\n',end='\n\n')
+    missing_key_modules, extra_key_modules = {k.split(".")[0] for k in missing_keys}, {k.split(".")[0] for k in extra_keys}
 
-    print("Extra keys from ckpt:")
-    print(*extra_key_modules, sep="\n", end="\n\n")
-    print(*extra_keys, sep="\n", end="\n\n")
+    print("------ Loading Checkpoint ------")
+
+    if missing_key_modules:
+        print("Missing keys from checkpoint:")
+        print(*missing_key_modules, sep="\n", end="\n\n")
+
+    if extra_key_modules:
+        print("Extra keys in checkpoint:")
+        print(*extra_key_modules, sep="\n", end="\n\n")
+
+    if extra_keys:
+        extra_keys = sorted(extra_keys)  # 全名比较复杂, 所以进行一下排序, 方便比较
+        print("Extra keys from checkpoint (full list):")
+        print(*extra_keys, sep="\n", end="\n\n")
 
     print("You can go to tools/train_utils.py to print the full missing key name!")
     print("--------------------------------")
+
+
+def _FindLastCheckpoint(save_dir):
+    file_list = glob.glob(os.path.join(save_dir, "*epoch*.pth"))
+    epochs_exist = [int(re.findall(".*epoch(.*).pth.*", f)[0]) for f in file_list] if file_list else [0]
+    return max(epochs_exist)
 
 
 def load_saved_model(saved_path, model):
@@ -70,38 +79,31 @@ def load_saved_model(saved_path, model):
     model : opencood object
         The model instance loaded pretrained params.
     """
-    assert os.path.exists(saved_path), "{} not found".format(saved_path)
-
-    def findLastCheckpoint(save_dir):
-        file_list = glob.glob(os.path.join(save_dir, "*epoch*.pth"))
-        if file_list:
-            epochs_exist = []
-            for file_ in file_list:
-                result = re.findall(".*epoch(.*).pth.*", file_)
-                epochs_exist.append(int(result[0]))
-            initial_epoch_ = max(epochs_exist)
-        else:
-            initial_epoch_ = 0
-        return initial_epoch_
-
+    assert os.path.exists(saved_path), f"{saved_path} not found"
+    # 有最好的先找最好的
     file_list = glob.glob(os.path.join(saved_path, "net_epoch_bestval_at*.pth"))
     if file_list:
         assert len(file_list) == 1
-        print(
-            "resuming best validation model at epoch %d"
-            % eval(file_list[0].split("/")[-1].rstrip(".pth").lstrip("net_epoch_bestval_at"))
-        )
-        loaded_state_dict = torch.load(file_list[0], map_location="cpu", weights_only=False)
-        check_missing_key(model.state_dict(), loaded_state_dict)
-        model.load_state_dict(loaded_state_dict, strict=False)
-        return eval(file_list[0].split("/")[-1].rstrip(".pth").lstrip("net_epoch_bestval_at")), model
+        epoch_str = file_list[0].split("/")[-1].replace("net_epoch_bestval_at", "").replace(".pth", "")
+        print(f"resuming best validation model at epoch {epoch_str}")
+        try:
+            loaded_state_dict = torch.load(file_list[0], map_location="cpu", weights_only=True)
+            # TODO: 这里为什么要将 loaded_state_dict 和 model.state_dict() 做对比?
+            check_missing_key(model.state_dict(), loaded_state_dict)
+            model.load_state_dict(loaded_state_dict, strict=False)
+        except Exception as e:
+            raise RuntimeError(f"Error loading model: {e}")
+        return int(epoch_str), model
 
-    initial_epoch = findLastCheckpoint(saved_path)
+    initial_epoch = _FindLastCheckpoint(saved_path)
     if initial_epoch > 0:
-        print("resuming by loading epoch %d" % initial_epoch)
-        loaded_state_dict = torch.load(os.path.join(saved_path, "net_epoch%d.pth" % initial_epoch), map_location="cpu")
-        check_missing_key(model.state_dict(), loaded_state_dict)
-        model.load_state_dict(loaded_state_dict, strict=False)
+        print(f"resuming by loading epoch {initial_epoch}")
+        try:
+            loaded_state_dict = torch.load(os.path.join(saved_path, f"net_epoch{initial_epoch}.pth"), map_location="cpu", weights_only=True) # fmt: skip
+            check_missing_key(model.state_dict(), loaded_state_dict)
+            model.load_state_dict(loaded_state_dict, strict=False)
+        except Exception as e:
+            raise RuntimeError(f"Error loading model at epoch {initial_epoch}: {e}")
 
     return initial_epoch, model
 
