@@ -5,6 +5,7 @@
 """
 Template for AnchorGenerator
 """
+from abc import abstractmethod
 
 import cv2
 import numpy as np
@@ -39,12 +40,13 @@ class BasePostprocessor(object):
         self.bbx_dict = {}
         self.train = train
 
+    @abstractmethod
     def generate_anchor_box(self):
-        # needs to be overloaded
-        return None
+        pass
 
+    @abstractmethod
     def generate_label(self, *argv):
-        return None
+        pass
 
     def generate_gt_bbx(self, data_dict):
         """

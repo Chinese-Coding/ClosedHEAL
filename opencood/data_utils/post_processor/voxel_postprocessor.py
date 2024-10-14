@@ -7,18 +7,25 @@
 3D Anchor Generator for Voxel
 """
 import math
-import sys
+import os.path
 
 import numpy as np
+import pyximport
 import torch
 import torch.nn.functional as F
+
 from opencood.data_utils.post_processor.base_postprocessor import BasePostprocessor
+from opencood.hypes_yaml import yaml_utils
 from opencood.utils import box_utils
-import pyximport
+
 pyximport.install(language_level=3, setup_args={"include_dirs": np.get_include()})
 from opencood.utils.box_overlaps import bbox_overlaps
 from opencood.utils.common_utils import limit_period
 from opencood.visualization import vis_utils
+
+
+def _GetWLHR(c, w, l, h, r):
+    return np.full_like(c, w), np.full_like(c, l), np.full_like(c, h), np.full_like(c, r)
 
 
 class VoxelPostprocessor(BasePostprocessor):
@@ -26,56 +33,43 @@ class VoxelPostprocessor(BasePostprocessor):
         super(VoxelPostprocessor, self).__init__(anchor_params, train)
         self.anchor_num = self.params["anchor_args"]["num"]
 
+    def _GetAnchorArgs(self):
+        anchorArgs = self.params["anchor_args"]
+        # fmt: off
+        return (
+          anchorArgs["W"], anchorArgs["H"], anchorArgs["l"], anchorArgs["w"], anchorArgs["h"], anchorArgs["r"],
+          anchorArgs["vh"], anchorArgs["vw"], anchorArgs["cav_lidar_range"], anchorArgs.get("feature_stride", 2)
+        )
+        # fmt: on
+
+    def _GetCenter(self, x, y):
+        cx, cy = np.meshgrid(x, y)
+        cx, cy = np.tile(cx[..., np.newaxis], self.anchor_num), np.tile(cy[..., np.newaxis], self.anchor_num)
+        cz = np.ones_like(cx) * -1.0
+        return cx, cy, cz
+
     def generate_anchor_box(self):
         # load_voxel_params and load_point_pillar_params leads to the same anchor
         # if voxel_size * feature stride is the same.
-        W = self.params["anchor_args"]["W"]
-        H = self.params["anchor_args"]["H"]
-
-        l = self.params["anchor_args"]["l"]
-        w = self.params["anchor_args"]["w"]
-        h = self.params["anchor_args"]["h"]
-        r = self.params["anchor_args"]["r"]
-
+        W, H, l, w, h, r, vh, vw, cav_lidar_range, feature_stride = self._GetAnchorArgs()
         assert self.anchor_num == len(r)
+
         r = [math.radians(ele) for ele in r]
 
-        vh = self.params["anchor_args"]["vh"]  # voxel_size
-        vw = self.params["anchor_args"]["vw"]
+        xrange, yrange = [cav_lidar_range[0], cav_lidar_range[3]], [cav_lidar_range[1], cav_lidar_range[4]]
 
-        xrange = [self.params["anchor_args"]["cav_lidar_range"][0], self.params["anchor_args"]["cav_lidar_range"][3]]
-        yrange = [self.params["anchor_args"]["cav_lidar_range"][1], self.params["anchor_args"]["cav_lidar_range"][4]]
+        # vw is not precise, vw * feature_stride / 2 should be better?
+        x, y = np.linspace(xrange[0] + vw, xrange[1] - vw, W // feature_stride), np.linspace(yrange[0] + vh, yrange[1] - vh, H // feature_stride) # fmt: skip
+        cx, cy, cz = self._GetCenter(x, y)
+        w, l, h, r = _GetWLHR(cx, w, l, h, r)
 
-        if "feature_stride" in self.params["anchor_args"]:
-            feature_stride = self.params["anchor_args"]["feature_stride"]
-        else:
-            feature_stride = 2
-
-        x = np.linspace(
-            xrange[0] + vw, xrange[1] - vw, W // feature_stride
-        )  # vw is not precise, vw * feature_stride / 2 should be better?
-        y = np.linspace(yrange[0] + vh, yrange[1] - vh, H // feature_stride)
-
-        cx, cy = np.meshgrid(x, y)
-        cx = np.tile(cx[..., np.newaxis], self.anchor_num)  # center
-        cy = np.tile(cy[..., np.newaxis], self.anchor_num)
-        cz = np.ones_like(cx) * -1.0
-
-        w = np.ones_like(cx) * w
-        l = np.ones_like(cx) * l
-        h = np.ones_like(cx) * h
-
-        r_ = np.ones_like(cx)
-        for i in range(self.anchor_num):
-            r_[..., i] = r[i]
-
-        if self.params["order"] == "hwl":  # pointpillar
-            anchors = np.stack([cx, cy, cz, h, w, l, r_], axis=-1)  # (50, 176, 2, 7)
-
-        elif self.params["order"] == "lhw":
-            anchors = np.stack([cx, cy, cz, l, h, w, r_], axis=-1)
-        else:
-            sys.exit("Unknown bbx order.")
+        match self.params["order"]:
+            case "hwl":
+                anchors = np.stack([cx, cy, cz, h, w, l, r], axis=-1)  # (50, 176, 2, 7)
+            case "lhw":
+                anchors = np.stack([cx, cy, cz, l, w, h, r], axis=-1)
+            case _:
+                raise NotImplementedError(f"{self.params['order']} is unknown bbx order.")
 
         return anchors
 
@@ -93,7 +87,7 @@ class VoxelPostprocessor(BasePostprocessor):
         label_dict : dict
             Dictionary that contains all target related info.
         """
-        assert self.params["order"] == "hwl", "Currently Voxel only support" "hwl bbx order."
+        assert self.params["order"] == "hwl", "Currently Voxel only support hwl bbx order."
         # (max_num, 7)
         gt_box_center = kwargs["gt_box_center"]
         # (H, W, anchor_num, 7)
@@ -431,3 +425,14 @@ class VoxelPostprocessor(BasePostprocessor):
 
         """
         vis_utils.visualize_single_sample_output_gt(pred_box_tensor, gt_tensor, pcd, show_vis, save_path)
+
+
+if __name__ == "__main__":
+    """一个针对 `VoxelPostprocessor 简单测试函数`"""
+    hypes = yaml_utils.load_yaml(os.path.expanduser("~/Desktop/OriginHEAL/opencood/hypes_yaml/opv2v/MoreModality/HEAL/stage1/m1_pyramid.yaml"), None) # fmt: skip
+    print(f"anchor num: {hypes['postprocess']['anchor_args']['num']}")
+    postprocessor = VoxelPostprocessor(hypes["postprocess"], True)
+    anchorBox = postprocessor.generate_anchor_box()
+    # `anchorBox.shape` 前两项表示生成的点的横纵坐标, 第三项表示一个点上生成 anchor 的个数, 最后一项表示这个框的一系列参数
+    # TODO: 是否可以把最后一项由 7 -> 4 呢? 也就说说中心坐标以及偏转角度不要了, 通过前面的索引判断
+    print(type(anchorBox), anchorBox.shape)  # <class 'numpy.ndarray'> (128, 256, 2, 7)
