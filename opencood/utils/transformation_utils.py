@@ -5,10 +5,12 @@
 """
 Transformation utils
 """
+from typing import Dict
 
 import numpy as np
 import torch
 
+from opencood.data_utils.data_models.dataset_models import CAVData
 from opencood.utils.common_utils import check_numpy_to_torch
 
 
@@ -18,7 +20,7 @@ def regroup(x, record_len):
     return split_x
 
 
-def get_pairwise_transformation(base_data_dict, max_cav, proj_first):
+def get_pairwise_transformation(base_data_dict: Dict[str, CAVData], max_cav, proj_first):
     """
     Get pair-wise transformation matrix accross different agents.
 
@@ -47,15 +49,11 @@ def get_pairwise_transformation(base_data_dict, max_cav, proj_first):
         # pairwise_t_matrix[:, :] = np.identity(4)
         return pairwise_t_matrix
     else:
-        t_list = []
+        t_list = [x_to_world(cav_content.params["lidar_pose"]) for cav_content in base_data_dict.values()]
 
-        # save all transformation matrix in a list in order first.
-        for cav_id, cav_content in base_data_dict.items():
-            lidar_pose = cav_content["params"]["lidar_pose"]
-            t_list.append(x_to_world(lidar_pose))  # Twx
-
-        for i in range(len(t_list)):
-            for j in range(len(t_list)):
+        t_list_len = len(t_list)
+        for i in range(t_list_len):
+            for j in range(t_list_len):
                 # identity matrix to self
                 if i != j:
                     # i->j: TiPi=TjPj, Tj^(-1)TiPi = Pj
