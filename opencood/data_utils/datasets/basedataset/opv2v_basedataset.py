@@ -197,7 +197,7 @@ class OPV2VBaseDataset(Dataset):
     def _LoadCameraAndDepth(self, cavContent, timestampKey):
         """Load camera and depth data. (hdf5 is faster than png)"""
         cameraData, depthData = [], []
-        hdf5_file = str(cavContent[timestampKey]["cameras"][0]).replace("camera0.png", "imgs.hdf5")
+        hdf5_file = str(cavContent[timestampKey].cameras[0]).replace("camera0.png", "imgs.hdf5")
         # TODO: 也许我应该试着把图片和深度信息转换成对应的 hdf5 格式
         if self.use_hdf5 and os.path.exists(hdf5_file):
             with h5py.File(hdf5_file, "r") as hdf5File:
@@ -243,7 +243,7 @@ class OPV2VBaseDataset(Dataset):
         for cav_id, cav_content in scenario_database.items():
             cavData = CAVData(
                 ego=cav_content["ego"],
-                params=_LoadParams(cav_content[timestamp_key]["yaml"]),
+                params=_LoadParams(cav_content[timestamp_key].yaml),
                 **(self._LoadCameraAndDepth(cav_content, timestamp_key)),
             )
 

@@ -43,6 +43,12 @@ def getIntermediateheterFusionDataset(cls):
     cls: the Basedataset.
     """
 
+    def _GetEgoCAVInfo(base_data_dict):
+        for cav_id, cav_content in base_data_dict.items():
+            if cav_content.ego:
+                return cav_id, cav_content.params["lidar_pose"], cav_content
+        return -1, [], None
+
     class IntermediateheterFusionDataset(cls):
         def __init__(self, params, visualize, train=True):
             super().__init__(params, visualize, train)
@@ -50,7 +56,7 @@ def getIntermediateheterFusionDataset(cls):
             # 来自GPT: 优化条件判断
             self.supervise_single = params["model"]["args"].get("supervise_single", False)
             self.proj_first = params["fusion"]["args"].get("proj_first", False)
-
+            self.comm_range = params["comm_range"]
             self.anchor_box = self.post_processor.generate_anchor_box()
             self.anchor_box_torch = torch.from_numpy(self.anchor_box)
 
@@ -99,246 +105,98 @@ def getIntermediateheterFusionDataset(cls):
                 self.stage1_result = read_json(self.stage1_result_path)
                 self.box_align_args = params["box_align"]["args"]
 
-        def get_item_single_car(self, selected_cav_base, ego_cav_base):
-            """
-            Process a single CAV's information for the train/test pipeline.
+        def _ProcessLidarData(self, selected_cav_base, sensor_type, modality_name, transformation_matrix):
+            lidar_np = mask_ego_points(shuffle_points(selected_cav_base["lidar_np"]))  # shape: (点云数量, 4)
+            # 对点云坐标进行投影 (不包括最后一维, 最后一维是反射强度)
+            projected_lidar = box_utils.project_points_by_matrix_torch(lidar_np[:, :3], transformation_matrix)
+            # project the lidar to ego space x, y, z in ego space
+            if self.proj_first:
+                lidar_np[:, :3] = projected_lidar
 
-
-            Parameters
-            ----------
-            selected_cav_base : dict
-                The dictionary contains a single CAV's raw information.
-                including 'params', 'camera_data'
-            ego_pose : list, length 6
-                The ego vehicle lidar pose under world coordinate.
-            ego_pose_clean : list, length 6
-                only used for gt box generation
-
-            Returns
-            -------
-            selected_cav_processed : dict
-                The dictionary contains the cav's processed information.
-            """
             selected_cav_processed = {}
-            ego_pose, ego_pose_clean = ego_cav_base["params"]["lidar_pose"], ego_cav_base["params"]["lidar_pose_clean"]
+            if self.visualize:  # filter lidar
+                selected_cav_processed.update({"projected_lidar": projected_lidar})
 
-            # calculate the transformation matrix
-            transformation_matrix = x1_to_x2(selected_cav_base["params"]["lidar_pose"], ego_pose)  # T_ego_cav
-            transformation_matrix_clean = x1_to_x2(selected_cav_base["params"]["lidar_pose_clean"], ego_pose_clean)
+            if self.kd_flag:
+                lidar_proj_np = copy.deepcopy(lidar_np)
+                lidar_proj_np[:, :3] = projected_lidar
+                selected_cav_processed.update({"projected_lidar": lidar_proj_np})
 
-            modality_name = selected_cav_base["modality_name"]
-            sensor_type = self.sensor_type_dict[modality_name]
+                # 2023.8.31, to correct discretization errors. Just replace one point to avoid empty voxels. need fix later.
+                lidar_proj_np[np.random.randint(0, lidar_proj_np.shape[0]), :3] = np.array([0, 0, 0])
+                processed_lidar_proj = eval(f"self.pre_processor_{modality_name}").preprocess(lidar_proj_np)
+                selected_cav_processed.update({f"processed_features_{modality_name}_proj": processed_lidar_proj})
 
-            # lidar
-            if sensor_type == "lidar" or self.visualize:
-                # process lidar
-                lidar_np = selected_cav_base["lidar_np"]
-                lidar_np = shuffle_points(lidar_np)
-                # remove points that hit itself
-                lidar_np = mask_ego_points(lidar_np)
-                # project the lidar to ego space
-                # x,y,z in ego space
-                projected_lidar = box_utils.project_points_by_matrix_torch(lidar_np[:, :3], transformation_matrix)
-                if self.proj_first:
-                    lidar_np[:, :3] = projected_lidar
-
-                if self.visualize:
-                    # filter lidar
-                    selected_cav_processed.update({"projected_lidar": projected_lidar})
-
-                if self.kd_flag:
-                    lidar_proj_np = copy.deepcopy(lidar_np)
-                    lidar_proj_np[:, :3] = projected_lidar
-
-                    selected_cav_processed.update({"projected_lidar": lidar_proj_np})
-
-                    # 2023.8.31, to correct discretization errors. Just replace one point to avoid empty voxels. need fix later.
-                    lidar_proj_np[np.random.randint(0, lidar_proj_np.shape[0]), :3] = np.array([0, 0, 0])
-                    processed_lidar_proj = eval(f"self.pre_processor_{modality_name}").preprocess(lidar_proj_np)
-                    selected_cav_processed.update({f"processed_features_{modality_name}_proj": processed_lidar_proj})
-
-                if sensor_type == "lidar":
-                    processed_lidar = self.preprocessor[modality_name].preprocess(lidar_np)
-                    selected_cav_processed.update({f"processed_features_{modality_name}": processed_lidar})
-
-            # generate targets label single GT, note the reference pose is itself.
-            object_bbx_center, object_bbx_mask, object_ids = self.generate_object_center(
-                [selected_cav_base], selected_cav_base["params"]["lidar_pose"]
-            )
-            label_dict = self.post_processor.generate_label(
-                gt_box_center=object_bbx_center, anchors=self.anchor_box, mask=object_bbx_mask
-            )
-            selected_cav_processed.update({
-                "single_label_dict": label_dict,
-                "single_object_bbx_center": object_bbx_center,
-                "single_object_bbx_mask": object_bbx_mask,
-            })
-
-            # camera
-            if sensor_type == "camera":
-                camera_data_list = selected_cav_base["camera_data"]
-                params = selected_cav_base["params"]
-                imgs = []
-                rots = []
-                trans = []
-                intrins = []
-                extrinsics = []
-                post_rots = []
-                post_trans = []
-
-                for idx, img in enumerate(camera_data_list):
-                    camera_to_lidar, camera_intrinsic = self.get_ext_int(params, idx)
-
-                    intrin = torch.from_numpy(camera_intrinsic)
-                    rot = torch.from_numpy(camera_to_lidar[:3, :3])  # R_wc, we consider world-coord is the lidar-coord
-                    tran = torch.from_numpy(camera_to_lidar[:3, 3])  # T_wc
-
-                    post_rot = torch.eye(2)
-                    post_tran = torch.zeros(2)
-
-                    img_src = [img]
-
-                    # depth
-                    if self.load_depth_file:
-                        depth_img = selected_cav_base["depth_data"][idx]
-                        img_src.append(depth_img)
-
-                    # data augmentation
-                    resize, resize_dims, crop, flip, rotate = sample_augmentation(
-                        eval(f"self.data_aug_conf_{modality_name}"), self.train
-                    )
-                    img_src, post_rot2, post_tran2 = img_transform(
-                        img_src,
-                        post_rot,
-                        post_tran,
-                        resize=resize,
-                        resize_dims=resize_dims,
-                        crop=crop,
-                        flip=flip,
-                        rotate=rotate,
-                    )
-                    # for convenience, make augmentation matrices 3x3
-                    post_tran = torch.zeros(3)
-                    post_rot = torch.eye(3)
-                    post_tran[:2] = post_tran2
-                    post_rot[:2, :2] = post_rot2
-
-                    # decouple RGB and Depth
-
-                    img_src[0] = normalize_img(img_src[0])
-                    if self.load_depth_file:
-                        img_src[1] = img_to_tensor(img_src[1]) * 255
-
-                    imgs.append(torch.cat(img_src, dim=0))
-                    intrins.append(intrin)
-                    extrinsics.append(torch.from_numpy(camera_to_lidar))
-                    rots.append(rot)
-                    trans.append(tran)
-                    post_rots.append(post_rot)
-                    post_trans.append(post_tran)
-
-                selected_cav_processed.update({
-                    f"image_inputs_{modality_name}": {
-                        "imgs": torch.stack(imgs),  # [Ncam, 3or4, H, W]
-                        "intrins": torch.stack(intrins),
-                        "extrinsics": torch.stack(extrinsics),
-                        "rots": torch.stack(rots),
-                        "trans": torch.stack(trans),
-                        "post_rots": torch.stack(post_rots),
-                        "post_trans": torch.stack(post_trans),
-                    }
-                })
-
-            # anchor box
-            selected_cav_processed.update({"anchor_box": self.anchor_box})
-
-            # note the reference pose ego
-            object_bbx_center, object_bbx_mask, object_ids = self.generate_object_center([selected_cav_base], ego_pose_clean)
-
-            selected_cav_processed.update({
-                "object_bbx_center": object_bbx_center[object_bbx_mask == 1],
-                "object_bbx_mask": object_bbx_mask,
-                "object_ids": object_ids,
-                "transformation_matrix": transformation_matrix,
-                "transformation_matrix_clean": transformation_matrix_clean,
-            })
+            if sensor_type == "lidar":
+                processed_lidar = self.preprocessor[modality_name].preprocess(lidar_np)
+                selected_cav_processed.update({f"processed_features_{modality_name}": processed_lidar})
 
             return selected_cav_processed
 
-        def __getitem__(self, idx):
-            base_data_dict: Dict[str, CAVData] = self.retrieve_base_data(idx)
-            base_data_dict = add_noise_data_dict(base_data_dict, self.params["noise_setting"])
+        def _ProcessCameraData(self, selected_cav_base, modality_name):
+            camera_data_list, params = selected_cav_base["camera_data"], selected_cav_base["params"]
+            imgs, rots, trans, intrins, extrinsics, post_rots, post_trans = [], [], [], [], [], [], []
 
-            processed_data_dict = {}
-            processed_data_dict["ego"] = {}
+            for idx, img in enumerate(camera_data_list):
+                camera_to_lidar, camera_intrinsic = self.get_ext_int(params, idx)
+                intrin = torch.from_numpy(camera_intrinsic)
 
-            ego_id = -1
-            ego_lidar_pose = []
-            ego_cav_base = None
+                # R_wc, we consider world-coord is the lidar-coord; t_wc
+                rot, tran = torch.from_numpy(camera_to_lidar[:3, :3]), torch.from_numpy(camera_to_lidar[:3, 3])
+                post_rot, post_tran = torch.eye(2), torch.zeros(2)
+                img_src = [img]
 
-            # first find the ego vehicle's lidar pose
-            for cav_id, cav_content in base_data_dict.items():
-                if cav_content.ego:
-                    ego_id = cav_id
-                    ego_lidar_pose = cav_content.params["lidar_pose"]
-                    ego_cav_base = cav_content
-                    break
+                # depth
+                if self.load_depth_file:
+                    depth_img = selected_cav_base["depth_data"][idx]
+                    img_src.append(depth_img)
 
-            assert cav_id == list(base_data_dict.keys())[0], "The first element in the OrderedDict must be ego"
-            assert ego_id != -1
-            assert len(ego_lidar_pose) > 0
-
-            inputListModalities = {f"m{i}": [] for i in range(4)}  # can contain lidar or camera
-
-            agent_modality_list = []
-            object_stack = []
-            object_id_stack = []
-            single_label_list = []
-            single_object_bbx_center_list = []
-            single_object_bbx_mask_list = []
-            exclude_agent = []
-            lidar_pose_list = []
-            lidar_pose_clean_list = []
-            cav_id_list = []
-
-            if self.visualize or self.kd_flag:
-                projected_lidar_stack = []
-                input_list_m1_proj = []  # 2023.8.31 to correct discretization errors with kd flag
-                input_list_m2_proj = []
-                input_list_m3_proj = []
-                input_list_m4_proj = []
-
-            # loop over all CAVs to process information
-            for cav_id, selected_cav_base in base_data_dict.items():
-                # check if the cav is within the communication range with ego
-                distance = math.sqrt(
-                    (selected_cav_base.params["lidar_pose"][0] - ego_lidar_pose[0]) ** 2
-                    + (selected_cav_base.params["lidar_pose"][1] - ego_lidar_pose[1]) ** 2
+                # data augmentation
+                resize, resize_dims, crop, flip, rotate = sample_augmentation(
+                    eval(f"self.data_aug_conf_{modality_name}"), self.train
                 )
+                img_src, post_rot2, post_tran2 = img_transform(
+                    img_src, post_rot, post_tran, resize, resize_dims, crop, flip, rotate
+                )
+                # for convenience, make augmentation matrices 3x3
+                post_tran = torch.zeros(3)
+                post_rot = torch.eye(3)
+                post_tran[:2] = post_tran2
+                post_rot[:2, :2] = post_rot2
 
-                # if distance is too far, we will just skip this agent
-                if distance > self.params["comm_range"]:
-                    exclude_agent.append(cav_id)
-                    continue
+                # decouple RGB and Depth
 
-                # if modality not match
-                if self.adaptor.unmatched_modality(selected_cav_base.modality_name):
-                    exclude_agent.append(cav_id)
-                    continue
+                img_src[0] = normalize_img(img_src[0])
+                if self.load_depth_file:
+                    img_src[1] = img_to_tensor(img_src[1]) * 255
 
-                lidar_pose_clean_list.append(selected_cav_base.params["lidar_pose_clean"])
-                lidar_pose_list.append(selected_cav_base.params["lidar_pose"])  # 6dof pose
-                cav_id_list.append(cav_id)
+                imgs.append(img_src)
+                intrins.append(intrin)
+                rots.append(rot)
+                trans.append(tran)
+                post_rots.append(post_rot)
+                post_trans.append(post_tran)
 
-            if len(cav_id_list) == 0:
-                return None
+            return {
+                "imgs": torch.stack(imgs),
+                "intrins": torch.stack(intrins),
+                "extrinsics": torch.stack(extrinsics),
+                "rots": torch.stack(rots),
+                "trans": torch.stack(trans),
+                "post_rots": torch.stack(post_rots),
+                "post_trans": torch.stack(post_trans),
+            }
 
-            for cav_id in exclude_agent:
-                base_data_dict.pop(cav_id)
+        def _GetLegalCAVIds(self, base_data_dict, ego_lidar_pose):
+            def _GetDistance(lidar_pose):
+                return math.sqrt((lidar_pose[0] - ego_lidar_pose[0]) ** 2 + (lidar_pose[1] - ego_lidar_pose[1]) ** 2)
 
-            ########## Updated by Yifan Lu 2022.1.26 ############
-            # box align to correct pose.
-            # stage1_content contains all agent. Even out of comm range.
+            def _Judge(modality_name, lidar_pose):
+                return not self.adaptor.unmatched_modality(modality_name) and _GetDistance(lidar_pose) <= self.comm_range
+
+            return [cav_id for cav_id, cav in base_data_dict.items() if _Judge(cav.modality_name, cav.params["lidar_pose"])]
+
+        def _BoxAlign(self, idx, base_data_dict, cav_id_list, lidar_pose_list):
             if self.box_align and str(idx) in self.stage1_result.keys():
                 from opencood.models.sub_modules.box_align_v2 import box_alignment_relative_sample_np
 
@@ -373,6 +231,142 @@ def getIntermediateheterFusionDataset(cls):
                         for i, cav_id in enumerate(cav_id_list):
                             lidar_pose_list[i] = cur_agnet_pose[i].tolist()
                             base_data_dict[cav_id]["params"]["lidar_pose"] = cur_agnet_pose[i].tolist()
+            return base_data_dict, lidar_pose_list
+
+        def _Dairv2x(self, object_stack):
+            if len(object_stack) == 1:
+                object_stack = object_stack[0]
+            else:
+                ego_boxes_np, cav_boxes_np = object_stack[0], object_stack[1]
+                order = self.params["postprocess"]["order"]
+
+                ego_corners_np, cav_corners_np = box_utils.boxes_to_corners_3d(ego_boxes_np, order), box_utils.boxes_to_corners_3d(cav_boxes_np, order) # fmt: skip
+                ego_polygon_list, cav_polygon_list = list(convert_format(ego_corners_np)), list(convert_format(cav_corners_np))
+                iou_thresh = 0.05
+
+                ious = np.array([compute_iou(cav_polygon, ego_polygon_list) for cav_polygon in cav_polygon_list])
+                gt_boxes_from_cav = cav_boxes_np[np.all(ious <= iou_thresh, axis=1)]
+
+                object_stack = np.vstack([ego_boxes_np, gt_boxes_from_cav]) if len(gt_boxes_from_cav) > 0 else ego_boxes_np
+            unique_indices = object_id_stack = np.arange(object_stack.shape[0])
+            return object_stack, unique_indices, object_id_stack
+
+        def get_item_single_car(self, selected_cav_base: CAVData, ego_cav_base: CAVData):
+            """
+            Process a single CAV's information for the train/test pipeline.
+
+
+            Parameters
+            ----------
+            selected_cav_base : dict
+                The dictionary contains a single CAV's raw information.
+                including 'params', 'camera_data'
+            ego_pose : list, length 6
+                The ego vehicle lidar pose under world coordinate.
+            ego_pose_clean : list, length 6
+                only used for gt box generation
+
+            Returns
+            -------
+            selected_cav_processed : dict
+                The dictionary contains the cav's processed information.
+            """
+            selected_cav_processed = {}
+            ego_pose, ego_pose_clean = ego_cav_base["params"]["lidar_pose"], ego_cav_base["params"]["lidar_pose_clean"]
+
+            # calculate the transformation matrix 向自车看齐
+            transformation_matrix = x1_to_x2(selected_cav_base.params["lidar_pose"], ego_pose)  # T_ego_cav
+            transformation_matrix_clean = x1_to_x2(selected_cav_base.params["lidar_pose_clean"], ego_pose_clean)
+
+            modality_name = selected_cav_base["modality_name"]
+            sensor_type = self.sensor_type_dict[modality_name]
+
+            # lidar
+            if sensor_type == "lidar" or self.visualize:
+                selected_cav_processed.update(
+                    self._ProcessLidarData(selected_cav_base, sensor_type, modality_name, transformation_matrix)
+                )
+
+            # generate targets label single GT, note the reference pose is itself.
+            object_bbx_center, object_bbx_mask, object_ids = self.generate_object_center(
+                [selected_cav_base], selected_cav_base["params"]["lidar_pose"]
+            )
+            label_dict = self.post_processor.generate_label(
+                gt_box_center=object_bbx_center, anchors=self.anchor_box, mask=object_bbx_mask
+            )
+            selected_cav_processed.update({
+                "single_label_dict": label_dict,
+                "single_object_bbx_center": object_bbx_center,
+                "single_object_bbx_mask": object_bbx_mask,
+            })
+
+            # camera
+            if sensor_type == "camera":
+                selected_cav_processed.update(
+                    {f"image_inputs_{modality_name}": self._ProcessCameraData(selected_cav_base, modality_name)}
+                )
+
+            # anchor box
+            selected_cav_processed.update({"anchor_box": self.anchor_box})
+
+            # note the reference pose ego
+            object_bbx_center, object_bbx_mask, object_ids = self.generate_object_center([selected_cav_base], ego_pose_clean)
+
+            selected_cav_processed.update({
+                "object_bbx_center": object_bbx_center[object_bbx_mask == 1],
+                "object_bbx_mask": object_bbx_mask,
+                "object_ids": object_ids,
+                "transformation_matrix": transformation_matrix,
+                "transformation_matrix_clean": transformation_matrix_clean,
+            })
+
+            return selected_cav_processed
+
+        def __getitem__(self, idx):
+            base_data_dict: Dict[str, CAVData] = self.retrieve_base_data(idx)
+            base_data_dict = add_noise_data_dict(base_data_dict, self.params["noise_setting"])
+
+            processed_data_dict = {}
+            processed_data_dict["ego"] = {}
+
+            # first find the ego vehicle's lidar pose
+            ego_id, ego_lidar_pose, ego_cav_base = _GetEgoCAVInfo(base_data_dict)
+
+            assert ego_id != -1
+            assert len(ego_lidar_pose) > 0
+
+            inputListModalities = {f"m{i}": [] for i in range(4)}  # can contain lidar or camera
+
+            agent_modality_list = []
+            object_stack = []
+            object_id_stack = []
+            single_label_list = []
+            single_object_bbx_center_list = []
+            single_object_bbx_mask_list = []
+
+            if self.visualize or self.kd_flag:
+                projected_lidar_stack = []
+                input_list_m1_proj = []  # 2023.8.31 to correct discretization errors with kd flag
+                input_list_m2_proj = []
+                input_list_m3_proj = []
+                input_list_m4_proj = []
+
+            # loop over all CAVs to process information
+            cav_id_list = self._GetLegalCAVIds(base_data_dict, ego_lidar_pose)
+
+            if len(cav_id_list) == 0:
+                return None
+
+            lidar_pose_clean_list, lidar_pose_list = zip(*[
+                (base_data_dict[cav_id].params["lidar_pose_clean"], base_data_dict[cav_id].params["lidar_pose"])
+                for cav_id in cav_id_list
+            ])
+
+            ########## Updated by Yifan Lu 2022.1.26 ############
+            # box align to correct pose.
+            # stage1_content contains all agent. Even out of comm range.
+            # 这段代码有明显意义, 给他提取出来, 我看不懂什么意思
+            base_data_dict, lidar_pose_list = self._BoxAlign(idx, base_data_dict, cav_id_list, lidar_pose_list)
 
             pairwise_t_matrix = get_pairwise_transformation(base_data_dict, self.max_cav, self.proj_first)
 
@@ -399,13 +393,13 @@ def getIntermediateheterFusionDataset(cls):
                 object_stack.append(selected_cav_processed["object_bbx_center"])
                 object_id_stack += selected_cav_processed["object_ids"]
 
-                if sensor_type == "lidar":
-                    # 因为 `modality_name` 的类型不一定为 str (刚才调试了一下类型为 `np.str_`), 这里转换一下
-                    inputListModalities[modality_name].append(selected_cav_processed[f"processed_features_{modality_name}"])
-                elif sensor_type == "camera":
-                    eval(f"input_list_{modality_name}").append(selected_cav_processed[f"image_inputs_{modality_name}"])
-                else:
-                    raise TypeError("错误的传感器类型!")
+                match sensor_type:
+                    case "lidar":
+                        inputListModalities[modality_name].append(selected_cav_processed[f"processed_features_{modality_name}"])
+                    case "camera":
+                        inputListModalities[modality_name].append(selected_cav_processed[f"processed_features_{modality_name}"])
+                    case _:
+                        raise TypeError("错误的传感器类型!")
 
                 agent_modality_list.append(modality_name)
 
@@ -433,36 +427,9 @@ def getIntermediateheterFusionDataset(cls):
                     "single_object_bbx_mask_torch": single_object_bbx_mask,
                 })
 
-            # exculude all repetitve objects, DAIR-V2X
+            # exculude all repetitve objects, DAIR-V2X, 给 DAIR-V2X 单独提取一个函数, 虽然我看不懂他在干什么
             if self.params["fusion"]["dataset"] == "dairv2x":
-                if len(object_stack) == 1:
-                    object_stack = object_stack[0]
-                else:
-                    ego_boxes_np = object_stack[0]
-                    cav_boxes_np = object_stack[1]
-                    order = self.params["postprocess"]["order"]
-                    ego_corners_np = box_utils.boxes_to_corners_3d(ego_boxes_np, order)
-                    cav_corners_np = box_utils.boxes_to_corners_3d(cav_boxes_np, order)
-                    ego_polygon_list = list(convert_format(ego_corners_np))
-                    cav_polygon_list = list(convert_format(cav_corners_np))
-                    iou_thresh = 0.05
-
-                    gt_boxes_from_cav = []
-                    for i in range(len(cav_polygon_list)):
-                        cav_polygon = cav_polygon_list[i]
-                        ious = compute_iou(cav_polygon, ego_polygon_list)
-                        if (ious > iou_thresh).any():
-                            continue
-                        gt_boxes_from_cav.append(cav_boxes_np[i])
-
-                    if len(gt_boxes_from_cav):
-                        object_stack_from_cav = np.stack(gt_boxes_from_cav)
-                        object_stack = np.vstack([ego_boxes_np, object_stack_from_cav])
-                    else:
-                        object_stack = ego_boxes_np
-
-                unique_indices = np.arange(object_stack.shape[0])
-                object_id_stack = np.arange(object_stack.shape[0])
+                object_stack, unique_id_stack, object_id_stack = self._Dairv2x(object_stack)
             else:
                 # exclude all repetitive objects, OPV2V-H
                 unique_indices = [object_id_stack.index(x) for x in set(object_id_stack)]
@@ -513,7 +480,7 @@ def getIntermediateheterFusionDataset(cls):
                 "lidar_poses_clean": lidar_poses_clean,
                 "lidar_poses": lidar_poses,
             })
-
+            # TODO: 我不太明白这里为什么会将 `sample_idx` 和 `cav_id_list` 单独写到后面添加, 是为了保持 processed_data_dict 字典顺序?
             if self.visualize:
                 processed_data_dict["ego"].update({"origin_lidar": np.vstack(projected_lidar_stack)})
 
