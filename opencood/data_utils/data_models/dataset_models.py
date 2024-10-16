@@ -3,7 +3,7 @@ from typing import List, Optional, Dict
 
 import numpy as np
 from PIL import Image
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SkipValidation
 
 """
 PF: path for
@@ -36,8 +36,8 @@ class CAVData(BaseModel):
 
     ego: bool
     params: Dict
-    camera_data: List[Image]
-    depth_data: List[Image]
+    camera_data: SkipValidation[List[Image.Image]]
+    depth_data: SkipValidation[List[Image.Image]]
 
     lidar_np: Optional[np.ndarray] = None
     modality_name: Optional[str] = None

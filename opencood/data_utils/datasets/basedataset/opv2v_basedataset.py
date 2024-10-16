@@ -171,10 +171,7 @@ class OPV2VBaseDataset(Dataset):
                     # load extra data
                     for file_extension in self.add_data_extension:
                         file_name = os.path.join(cav_path, timestamp + "_" + file_extension)
-                        pfTimestampData.file_extensions[file_extension] = (
-                            file_name  # TODO: 在 PFTimestampData 中添加一个 `file_extension` 属性
-                        )
-                        # self.scenario_database[i][cav_id][timestamp][file_extension] = file_name
+                        pfTimestampData.file_extensions[file_extension] = file_name
 
                     self.scenario_database[i][cav_id][timestamp] = pfTimestampData
                 # Assume all cavs will have the same timestamps length. Thus
@@ -217,7 +214,7 @@ class OPV2VBaseDataset(Dataset):
 
         return {"camera_data": cameraData, "depth_data": depthData}
 
-    def retrieve_base_data(self, idx):
+    def retrieve_base_data(self, idx) -> Dict[str, CAVData]:
         """
         Given the index, return the corresponding data.
 

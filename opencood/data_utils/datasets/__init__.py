@@ -1,8 +1,10 @@
+import opencood.data_utils.datasets.base_datasets.opv2v_base_dataset
 from opencood.data_utils.datasets.basedataset.dairv2x_basedataset import DAIRV2XBaseDataset
 from opencood.data_utils.datasets.basedataset.opv2v_basedataset import OPV2VBaseDataset
 from opencood.data_utils.datasets.basedataset.v2xset_basedataset import V2XSETBaseDataset
 from opencood.data_utils.datasets.basedataset.v2xsim_basedataset import V2XSIMBaseDataset
 from opencood.data_utils.datasets.early_fusion_dataset import getEarlyFusionDataset
+from opencood.data_utils.datasets.fusion_dataset.inter_hetero_fusion_dataset import InterHeteroFusionDataset
 from opencood.data_utils.datasets.heter_infer.intermediate_heter_infer_fusion_dataset import (
     getIntermediateheterinferFusionDataset,
 )
@@ -37,3 +39,14 @@ def build_dataset(dataset_cfg, visualize=False, train=True):
     dataset = fusion_dataset_func(base_dataset_cls)(params=dataset_cfg, visualize=visualize, train=train)
     dataset = Subset(dataset, range(0, 100))  # 使用 Subset, 只让一部分数据进行训练
     return dataset
+
+
+# _FUSION_DATASET = {"InterHeter": InterHeterFusionDataset}
+#
+# _BASE_DATASET = {
+#     "OPV2V": opencood.data_utils.datasets.base_datasets.opv2v_base_dataset.OPV2VBaseDataset,
+# }
+#
+#
+# def BuildDataset(dataset_cfg, visualize=False, train=True):
+#     fusion_name, dataset_name = dataset_cfg["fusion"]["core_method"], dataset_cfg["fusion"]["dataset"]
