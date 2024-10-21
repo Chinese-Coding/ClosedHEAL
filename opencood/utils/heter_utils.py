@@ -23,6 +23,7 @@ class Adaptor:
         if cav_preference is None:
             cav_preference = dict.fromkeys(model_modality_list, 1 / len(model_modality_list))
         self.cav_preferece = cav_preference  # training, probability for setting non-ego cav modality
+        self.cav_preference = cav_preference  # training, probability for setting non-ego cav modality
         self.train = train
 
     def reorder_cav_list(self, cav_list, scenario_name):
@@ -63,7 +64,7 @@ class Adaptor:
             # always assign the ego_modality to idx 0 in cav_list
             if idx_in_cav_list == 0:
                 return np.random.choice(self.ego_modality.split("&"))
-            return random.choices(list(self.cav_preferece.keys()), weights=self.cav_preferece.values())[0]
+            return random.choices(list(self.cav_preference.keys()), weights=self.cav_preference.values())[0]
         else:
             return self.mapping_dict[modality_name]
 
