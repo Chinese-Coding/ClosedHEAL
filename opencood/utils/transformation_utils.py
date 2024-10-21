@@ -8,10 +8,14 @@ Transformation utils
 from typing import Dict
 
 import numpy as np
+import pyximport
 import torch
 
 from opencood.data_utils.data_models.dataset_models import CAVData
 from opencood.utils.common_utils import check_numpy_to_torch
+
+pyximport.install(language_level=3, setup_args={"include_dirs": np.get_include()})
+from opencood.utils.transformation_utils_cython import X1ToX2
 
 
 def regroup(x, record_len):
@@ -308,6 +312,16 @@ def x_to_world(pose):
     return matrix
 
 
+def X1ToX2UsingCython(x1: list[float], x2: list[float]):
+    """
+
+    :param x1: shape: (6,)
+    :param x2: shape: (6,)
+    """
+    x1, x2 = np.array(x1), np.array(x2)
+    return X1ToX2(x1, x2)
+
+
 def x1_to_x2(x1, x2):
     """
     Transformation matrix from x1 to x2. T_x2_x1
@@ -505,6 +519,26 @@ def test():
     print()
     print(tfm)
     print(tfm2)
+
+
+def _TestForX1ToX2():
+    """
+    经过测试, 还是用 cython 实现的更快一些, 但是差距比较小, 可能在多次循环迭代中差距会越拉越大
+    """
+    import time
+    import random
+
+    x1, x2 = [random.uniform(1.0, 100.0) for _ in range(6)], [random.uniform(1.0, 100.0) for _ in range(6)]
+
+    start_numpy = time.time()
+    tmp = x1_to_x2(x1, x2)
+    end_numpy = time.time()
+    print(f"Time taken numpy implementation:  {end_numpy - start_numpy}")
+
+    start_numpy = time.time()
+    tmp = X1ToX2UsingCython(x1, x2)
+    end_numpy = time.time()
+    print(f"Time taken cython implementation: {end_numpy - start_numpy}")
 
 
 if __name__ == "__main__":

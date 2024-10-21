@@ -35,7 +35,7 @@ from opencood.utils.pcd_utils import (
     downsample_lidar_minimum,
 )
 from opencood.utils.pose_utils import add_noise_data_dict
-from opencood.utils.transformation_utils import x1_to_x2, get_pairwise_transformation
+from opencood.utils.transformation_utils import get_pairwise_transformation, X1ToX2UsingCython
 
 
 def getIntermediateheterFusionDataset(cls):
@@ -108,7 +108,7 @@ def getIntermediateheterFusionDataset(cls):
         def _ProcessLidarData(self, selected_cav_base, sensor_type, modality_name, transformation_matrix):
             lidar_np = mask_ego_points(shuffle_points(selected_cav_base["lidar_np"]))  # shape: (点云数量, 4)
             # 对点云坐标进行投影 (不包括最后一维, 最后一维是反射强度)
-            projected_lidar = box_utils.project_points_by_matrix_torch(lidar_np[:, :3], transformation_matrix)
+            projected_lidar = box_utils.ProjectPointsByMatrixUsingCython(lidar_np[:, :3], transformation_matrix.astype(np.float32)) # fmt: skip
             # project the lidar to ego space x, y, z in ego space
             if self.proj_first:
                 lidar_np[:, :3] = projected_lidar
@@ -275,8 +275,8 @@ def getIntermediateheterFusionDataset(cls):
             ego_pose, ego_pose_clean = ego_cav_base["params"]["lidar_pose"], ego_cav_base["params"]["lidar_pose_clean"]
 
             # calculate the transformation matrix 向自车看齐
-            transformation_matrix = x1_to_x2(selected_cav_base.params["lidar_pose"], ego_pose)  # T_ego_cav
-            transformation_matrix_clean = x1_to_x2(selected_cav_base.params["lidar_pose_clean"], ego_pose_clean)
+            transformation_matrix = X1ToX2UsingCython(selected_cav_base.params["lidar_pose"], ego_pose)  # T_ego_cav
+            transformation_matrix_clean = X1ToX2UsingCython(selected_cav_base.params["lidar_pose_clean"], ego_pose_clean)
 
             modality_name = selected_cav_base["modality_name"]
             sensor_type = self.sensor_type_dict[modality_name]

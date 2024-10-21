@@ -15,6 +15,13 @@ import torch
 import torch.nn.functional as F
 from opencood.utils.transformation_utils import x1_to_x2, x_to_world
 from pyquaternion import Quaternion
+import pyximport
+
+pyximport.install(language_level=3, setup_args={"include_dirs": np.get_include()})
+from opencood.utils.box_utils_cython import (
+    ProjectPointsByMatrixUsingCython32,
+    ProjectPointsByMatrixUsingCython64,
+)
 
 
 def corner_to_center_torch(corner3d, order="lwh"):
@@ -173,18 +180,16 @@ def boxes_to_corners_3d(boxes3d, order):
         boxes3d_ = boxes3d[:, [0, 1, 2, 5, 4, 3, 6]]
 
     template = (
-        boxes3d_.new_tensor(
-            (
-                [1, -1, -1],
-                [1, 1, -1],
-                [-1, 1, -1],
-                [-1, -1, -1],
-                [1, -1, 1],
-                [1, 1, 1],
-                [-1, 1, 1],
-                [-1, -1, 1],
-            )
-        )
+        boxes3d_.new_tensor((
+            [1, -1, -1],
+            [1, 1, -1],
+            [-1, 1, -1],
+            [-1, -1, -1],
+            [1, -1, 1],
+            [1, 1, 1],
+            [-1, 1, 1],
+            [-1, -1, 1],
+        ))
         / 2
     )
 
@@ -303,34 +308,6 @@ def project_box3d(box3d, transformation_matrix):
     return projected_box3d if not is_numpy else projected_box3d.numpy()
 
 
-def project_points_by_matrix_torch(points, transformation_matrix):
-    """
-    Project the points to another coordinate system based on the
-    transfomration matrix.
-
-    IT NOT USED. LATTER ONE WITH THE SAME NAME WILL BE USED.
-
-    Parameters
-    ----------
-    points : torch.Tensor
-        3D points, (N, 3)
-
-    transformation_matrix : torch.Tensor
-        Transformation matrix, (4, 4)
-
-    Returns
-    -------
-    projected_points : torch.Tensor
-        The projected points, (N, 3)
-    """
-    # convert to homogeneous  coordinates via padding 1 at the last dimension.
-    # (N, 4)
-    points_homogeneous = F.pad(points, (0, 1), mode="constant", value=1)
-    # (N, 4)
-    projected_points = torch.einsum("ik, jk->ij", points_homogeneous, transformation_matrix)
-    return projected_points[:, :3]
-
-
 def get_mask_for_boxes_within_range_torch(boxes, gt_range):
     """
     Generate mask to remove the bounding boxes
@@ -418,18 +395,16 @@ def create_bbx(extent):
         The bounding box with 8 corners, shape: (8, 3)
     """
 
-    bbx = np.array(
-        [
-            [extent[0], -extent[1], -extent[2]],
-            [extent[0], extent[1], -extent[2]],
-            [-extent[0], extent[1], -extent[2]],
-            [-extent[0], -extent[1], -extent[2]],
-            [extent[0], -extent[1], extent[2]],
-            [extent[0], extent[1], extent[2]],
-            [-extent[0], extent[1], extent[2]],
-            [-extent[0], -extent[1], extent[2]],
-        ]
-    )
+    bbx = np.array([
+        [extent[0], -extent[1], -extent[2]],
+        [extent[0], extent[1], -extent[2]],
+        [-extent[0], extent[1], -extent[2]],
+        [-extent[0], -extent[1], -extent[2]],
+        [extent[0], -extent[1], extent[2]],
+        [extent[0], extent[1], extent[2]],
+        [-extent[0], extent[1], extent[2]],
+        [-extent[0], -extent[1], extent[2]],
+    ])
 
     return bbx
 
@@ -861,6 +836,39 @@ def remove_bbx_abnormal_z(bbx_3d):
     return index
 
 
+def ProjectPointsByMatrixUsingCython(points: np.ndarray, transformation_matrix: np.ndarray) -> np.ndarray:
+    if points.dtype == np.float32 and transformation_matrix.dtype == np.float32:
+        return ProjectPointsByMatrixUsingCython32(points, transformation_matrix)
+    elif points.dtype == np.float64 and transformation_matrix.dtype == np.float64:
+        return ProjectPointsByMatrixUsingCython64(points, transformation_matrix)
+    else:
+        raise TypeError(f"points 和 transformation_matrix 的数据类型不匹配. {points.dtype=}, {transformation_matrix.dtype=}")
+
+
+def ProjectPointsByMatrixUsingTorch(points: np.ndarray, transformation_matrix: np.ndarray) -> np.ndarray:
+    """
+    虽然函数传入的参数以及返回类型都是 `np.ndarray` 但是中间的计算过程是通过 torch 完成的, 我不知道这样比完全用 numpy 计算能快多少
+    """
+    points, transformation_matrix = torch.from_numpy(points).float(), torch.from_numpy(transformation_matrix).float()
+
+    # convert to homogeneous coordinates via padding 1 at the last dimension.
+    # (N, 4)
+    points_homogeneous = F.pad(points, (0, 1), mode="constant", value=1)
+    # (N, 4)
+    projected_points = torch.einsum("ik, jk->ij", points_homogeneous, transformation_matrix)
+
+    return projected_points[:, :3].numpy()
+
+
+def ProjectPointsByMatrixUsingNumpy(points: np.ndarray, transformation_matrix: np.ndarray) -> np.ndarray:
+    # convert to homogeneous coordinates via padding 1 at the last dimension
+    points_homogeneous = np.pad(points, ((0, 0), (0, 1)), mode="constant", constant_values=1)
+    # Perform matrix multiplication
+    projected_points = np.dot(points_homogeneous, transformation_matrix.T)
+
+    return projected_points[:, :3]
+
+
 def project_points_by_matrix_torch(points, transformation_matrix):
     """
     Project the points to another coordinate system based on the
@@ -1284,3 +1292,40 @@ def project_world_visible_objects(object_dict, output_dict, lidar_pose, lidar_ra
 
         if bbx_lidar.shape[0] > 0 and box_is_visible(bbx_lidar, visibility_map):
             output_dict.update({object_id: bbx_lidar})
+
+
+def _TestForProjectPointsByMatrix():
+    """
+    这是用来测试 `ProjectPointsByMatrix` 系列函数在 numpy 以及 torch 实现上速度快慢的函数
+    经过测试发现还是直接使用 numpy 的版本更快一些.
+    本想着搬运到 GPU 上是不是更快一些, 不成想反而更慢了, 性能瓶颈应该是在把数据搬运到 GPU 上额外消耗了不少时间.
+    反而得不偿失了, 还有一点值得注意, 这个函数并没有校验两者的计算是否正确.
+    在从 np.ndarray -> tensor 的过程中数据类型从 float64 变成了 float32, 应该会有精度的损失.
+    """
+    import time
+
+    N = 60000
+    points, transformation_matrix = np.random.rand(N, 3), np.random.rand(4, 4)
+    print(points.dtype, transformation_matrix.dtype)
+
+    # Test torch version
+    start_torch = time.time()
+    projected_torch = ProjectPointsByMatrixUsingTorch(points, transformation_matrix)
+    end_torch = time.time()
+    print(f"Time taken by torch implementation:  {end_torch - start_torch:.6f} seconds. Type: {projected_torch.dtype}")
+
+    # Test numpy version
+    start_numpy = time.time()
+    projected_numpy = ProjectPointsByMatrixUsingNumpy(points, transformation_matrix)
+    end_numpy = time.time()
+    print(f"Time taken by numpy implementation:  {end_numpy - start_numpy:.6f} seconds. Type: {projected_numpy.dtype}")
+
+    # Test cython version
+    start_numpy = time.time()
+    projected_cython = ProjectPointsByMatrixUsingCython(points, transformation_matrix)
+    end_numpy = time.time()
+    print(f"Time taken by cython implementation: {end_numpy - start_numpy:.6f} seconds. Type: {projected_cython.dtype}")
+
+
+if __name__ == "__main__":
+    _TestForProjectPointsByMatrix()
