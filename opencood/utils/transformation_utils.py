@@ -15,7 +15,7 @@ from opencood.data_utils.data_models.dataset_models import CAVData
 from opencood.utils.common_utils import check_numpy_to_torch
 
 pyximport.install(language_level=3, setup_args={"include_dirs": np.get_include()})
-from opencood.utils.transformation_utils_cython import X1ToX2
+from opencood.utils.cython.transformation_utils import X1ToX2
 
 
 def regroup(x, record_len):
@@ -312,7 +312,7 @@ def x_to_world(pose):
     return matrix
 
 
-def X1ToX2UsingCython(x1: list[float], x2: list[float]):
+def X1ToX2UsingCython(x1: list[float], x2: list[float]) -> np.ndarray[np.float64]:
     """
 
     :param x1: shape: (6,)

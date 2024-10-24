@@ -19,7 +19,8 @@ from opencood.hypes_yaml import yaml_utils
 from opencood.utils import box_utils
 
 pyximport.install(language_level=3, setup_args={"include_dirs": np.get_include()})
-from opencood.utils.box_overlaps import bbox_overlaps
+from opencood.utils.cython.box_overlaps import bbox_overlaps
+from opencood.data_utils.post_processor import voxel_cython
 from opencood.utils.common_utils import limit_period
 from opencood.visualization import vis_utils
 
@@ -32,6 +33,7 @@ class VoxelPostprocessor(BasePostprocessor):
     def __init__(self, anchor_params, train):
         super(VoxelPostprocessor, self).__init__(anchor_params, train)
         self.anchor_num = self.params["anchor_args"]["num"]
+        self.targetPosThreshold, self.targetNegThreshold = self.params["target_args"]["pos_threshold"], self.params["target_args"]["neg_threshold"] # fmt: skip
 
     def _GetAnchorArgs(self):
         anchorArgs = self.params["anchor_args"]
@@ -48,6 +50,9 @@ class VoxelPostprocessor(BasePostprocessor):
         cz = np.ones_like(cx) * -1.0
         return cx, cy, cz
 
+    def GenerateAnchorBox(self):
+        return voxel_cython.GenerateAnchorBox(self.params["anchor_args"], self.anchor_num, self.order)
+
     def generate_anchor_box(self):
         # load_voxel_params and load_point_pillar_params leads to the same anchor
         # if voxel_size * feature stride is the same.
@@ -63,15 +68,25 @@ class VoxelPostprocessor(BasePostprocessor):
         cx, cy, cz = self._GetCenter(x, y)
         w, l, h, r = _GetWLHR(cx, w, l, h, r)
 
-        match self.params["order"]:
+        match self.order:
             case "hwl":
-                anchors = np.stack([cx, cy, cz, h, w, l, r], axis=-1)  # (50, 176, 2, 7)
+                return np.stack([cx, cy, cz, h, w, l, r], axis=-1)  # (50, 176, 2, 7)
             case "lhw":
-                anchors = np.stack([cx, cy, cz, l, w, h, r], axis=-1)
+                return np.stack([cx, cy, cz, l, h, w, r], axis=-1)
             case _:
-                raise NotImplementedError(f"{self.params['order']} is unknown bbx order.")
+                raise NotImplementedError(f"{self.order} is unknown bbx order.")
 
-        return anchors
+    def GenerateLabel(self, GTBoxCenter: np.ndarray[np.float64], anchors: np.ndarray[np.float64], masks: np.ndarray[np.int64]):
+        """
+        `max_num` 是配置文件中的参数; `H`, `W` 指的是特征图的大小 (具体也是由配置文件里面的参数决定的, 但是应该不能直接看到)
+        `anchor_num` 也是配置文件里面的参数; `7` 一种坐标表示形式
+        :param GTBoxCenter: shape: (max_num, 7)
+        :param anchors:       shape: (H, W, anchor_num, 7)
+        :param masks:         shape: (max_num, )
+        """
+        return voxel_cython.GenerateLabel(
+            GTBoxCenter, anchors, masks, self.anchor_num, self.order, self.targetPosThreshold, self.targetNegThreshold
+        )
 
     def generate_label(self, **kwargs):
         """

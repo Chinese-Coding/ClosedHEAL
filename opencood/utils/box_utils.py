@@ -10,18 +10,17 @@ import copy
 import sys
 
 import numpy as np
-import opencood.utils.common_utils as common_utils
+import pyximport
 import torch
 import torch.nn.functional as F
-from opencood.utils.transformation_utils import x1_to_x2, x_to_world
 from pyquaternion import Quaternion
-import pyximport
+
+import opencood.utils.common_utils as common_utils
+from opencood.utils.transformation_utils import x1_to_x2, x_to_world
 
 pyximport.install(language_level=3, setup_args={"include_dirs": np.get_include()})
-from opencood.utils.box_utils_cython import (
-    ProjectPointsByMatrixUsingCython32,
-    ProjectPointsByMatrixUsingCython64,
-)
+
+from opencood.utils.cython.box_utils import ProjectPointsByMatrixFloat32, ProjectPointsByMatrixFloat64
 
 
 def corner_to_center_torch(corner3d, order="lwh"):
@@ -838,9 +837,9 @@ def remove_bbx_abnormal_z(bbx_3d):
 
 def ProjectPointsByMatrixUsingCython(points: np.ndarray, transformation_matrix: np.ndarray) -> np.ndarray:
     if points.dtype == np.float32 and transformation_matrix.dtype == np.float32:
-        return ProjectPointsByMatrixUsingCython32(points, transformation_matrix)
+        return ProjectPointsByMatrixFloat32(points, transformation_matrix)
     elif points.dtype == np.float64 and transformation_matrix.dtype == np.float64:
-        return ProjectPointsByMatrixUsingCython64(points, transformation_matrix)
+        return ProjectPointsByMatrixFloat64(points, transformation_matrix)
     else:
         raise TypeError(f"points 和 transformation_matrix 的数据类型不匹配. {points.dtype=}, {transformation_matrix.dtype=}")
 

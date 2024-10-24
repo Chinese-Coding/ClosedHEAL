@@ -10,6 +10,10 @@ Utility functions related to point cloud
 import numpy as np
 import open3d as o3d
 from pypcd import pypcd
+import pyximport
+
+pyximport.install(language_level=3, setup_args={"include_dirs": np.get_include()})
+from opencood.utils.cython.pcd_utils import ShufflePoints, MaskEgoPoints
 
 
 def pcd_to_np(pcd_file):
@@ -96,6 +100,10 @@ def shuffle_points(points):
     points = points[shuffle_idx]
 
     return points
+
+
+def ProcessPointsUsingCython(points: np.ndarray[np.float32]):
+    return MaskEgoPoints(shuffle_points(points))
 
 
 def lidar_project(lidar_data, extrinsic):

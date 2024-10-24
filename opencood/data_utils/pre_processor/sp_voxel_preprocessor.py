@@ -31,7 +31,7 @@ class SpVoxelPreprocessor(BasePreprocessor):
         # use sparse conv library to generate voxel TODO: 变量的命名上是否要做到和使用的 api 保持一致呢?
         self.voxel_generator = VoxelGenerator(self.voxel_size, self.lidar_range, 4, self.max_voxels, self.max_points_per_voxel)
 
-    def preprocess(self, pcd_np):
+    def preprocess(self, pcd_np: np.ndarray[np.float32]):
         pcd_tv = tv.from_numpy(pcd_np)
         voxel_output = self.voxel_generator.point_to_voxel(pcd_tv)
         voxels, coordinates, num_points = voxel_output
@@ -114,3 +114,27 @@ class SpVoxelPreprocessor(BasePreprocessor):
         )
 
         return {"voxel_features": voxel_features, "voxel_coords": voxel_coords, "voxel_num_points": voxel_num_points}
+
+
+def _TestForFromNumpy():
+    """
+    经测试 `tv.from_nupy` 速度更快. 但是 cumm 这个库网上的资料挺少的.
+    """
+    import time
+
+    pcd_np = np.random.rand(3000, 4)
+
+    # Test for `tv.from_numpy`
+    start_tv = time.time()
+    a = tv.from_numpy(pcd_np)
+    end_tv = time.time()
+    print("tv.from_numpy:    ", end_tv - start_tv)
+
+    start_ch = time.time()
+    b = torch.from_numpy(pcd_np)
+    end_ch = time.time()
+    print("torch.from_numpy: ", end_ch - start_ch)
+
+
+if __name__ == "__main__":
+    _TestForFromNumpy()
