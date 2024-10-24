@@ -6,6 +6,8 @@
 Template for AnchorGenerator
 """
 from abc import abstractmethod
+from collections import ChainMap
+from typing import Dict, List
 
 import cv2
 import numpy as np
@@ -15,6 +17,10 @@ from opencood.data_utils.data_models.dataset_models import CAVData
 from opencood.utils import box_utils
 from opencood.utils import common_utils
 from opencood.utils.transformation_utils import x1_to_x2
+import pyximport
+
+pyximport.install(language_level=3, setup_args={"include_dirs": np.get_include()})
+from opencood.utils.cython import box_utils as box_utils_cython
 
 
 class BasePostprocessor(object):
@@ -39,6 +45,10 @@ class BasePostprocessor(object):
         self.params = anchor_params
         self.bbx_dict = {}
         self.train = train
+
+        self.order, self.maxNum = anchor_params["order"], anchor_params["max_num"]
+        self.filter_range = self.params["anchor_args"]["cav_lidar_range"] if self.train else self.params["gt_range"]
+        self.filter_range_numpy = np.array(self.filter_range)
 
     @abstractmethod
     def generate_anchor_box(self):
@@ -187,6 +197,20 @@ class BasePostprocessor(object):
         gt_box3d_tensor = gt_box3d_tensor[mask, :, :]
 
         return gt_box3d_tensor
+
+    def GenerateObjectCenter(self, cav_contents: List[CAVData], reference_lidar_pose: np.ndarray[np.float64], enlarge_z=False):
+        # 使用 ChainMap 合并多个字典，避免重复创建中间字典
+        tmp_object_dict: Dict[int, np.ndarray] = dict(ChainMap(*(cav_content.params["vehicles"] for cav_content in cav_contents))) # fmt: skip
+
+        output_dict: Dict[int, np.ndarray] = box_utils_cython.ProjectWorldObjects(
+            tmp_object_dict, np.array(reference_lidar_pose), self.filter_range_numpy, self.order, enlarge_z
+        )
+        numObjs = min(len(output_dict), self.maxNum)
+
+        object_np, mask, object_ids = np.zeros((self.maxNum, 7)), np.zeros(self.maxNum), list(output_dict.keys())[:numObjs]
+        object_np[:numObjs], mask[:numObjs] = np.array([output_dict[objId][0, :] for objId in object_ids]), np.ones(numObjs)
+
+        return object_np, mask.astype(np.int64), object_ids
 
     def generate_object_center(self, cav_contents, reference_lidar_pose, enlarge_z=False):
         """

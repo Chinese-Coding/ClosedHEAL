@@ -16,13 +16,14 @@ class Adaptor:
         self, ego_modality, model_modality_list, modality_assignment, lidar_channels_dict, mapping_dict, cav_preference, train
     ):
         self.ego_modality = ego_modality
+        self.egoModalityList = ego_modality.split("&")
         self.model_modality_list = model_modality_list
         self.modality_assignment = modality_assignment
         self.lidar_channels_dict = lidar_channels_dict
         self.mapping_dict = mapping_dict
         if cav_preference is None:
             cav_preference = dict.fromkeys(model_modality_list, 1 / len(model_modality_list))
-        self.cav_preferece = cav_preference  # training, probability for setting non-ego cav modality
+        self.cav_preference_keys, self.cav_preference_values = list(cav_preference.keys()), list(cav_preference.values())
         self.cav_preference = cav_preference  # training, probability for setting non-ego cav modality
         self.train = train
 
@@ -55,6 +56,16 @@ class Adaptor:
             cav_list = [ego_cav] + other_cav
 
         return cav_list
+
+    def ReassignCAVModality(self, scenario_name, cav_id, idx_in_cav_list):
+        modality_name = self.modality_assignment[scenario_name][cav_id]
+        # fmt: off
+        return (
+            random.choice(self.egoModalityList) if idx_in_cav_list == 0
+            else random.choices(self.cav_preference_keys, weights=self.cav_preference_values)[0]
+            if self.train else self.mapping_dict[modality_name]
+        )
+        # fmt: on
 
     def reassign_cav_modality(self, modality_name, idx_in_cav_list):
         """
