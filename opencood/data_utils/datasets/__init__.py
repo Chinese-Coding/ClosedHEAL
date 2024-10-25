@@ -36,5 +36,5 @@ def build_dataset(dataset_cfg, visualize=False, train=True):
     base_dataset_cls = eval(base_dataset_cls)
 
     dataset = fusion_dataset_func(base_dataset_cls)(params=dataset_cfg, visualize=visualize, train=train)
-    dataset = Subset(dataset, range(0, 100))  # 使用 Subset, 只让一部分数据进行训练
+    # dataset = Subset(dataset, range(0, 5000))  # 使用 Subset, 只让一部分数据进行训练
     return dataset

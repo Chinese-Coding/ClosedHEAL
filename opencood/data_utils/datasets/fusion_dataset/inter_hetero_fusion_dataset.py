@@ -10,6 +10,7 @@ Each agent should retrieve the objects itself, and merge them by iou,
 instead of using the cooperative label.
 """
 
+import sys
 from typing import Dict
 
 import numpy as np
@@ -18,6 +19,7 @@ import torch
 from torch.utils.data import Dataset
 
 from opencood.data_utils.data_models.dataset_models import CAVData
+from opencood.data_utils.datasets.base_datasets.opv2v_dataset import OPV2VDataset
 from opencood.data_utils.pre_processor import build_preprocessor
 from opencood.utils import box_utils as box_utils
 from opencood.utils.camera_utils import (
@@ -34,7 +36,6 @@ from opencood.utils.pcd_utils import (
     ProcessPointsUsingCython,
 )
 
-
 pyximport.install(language_level=3, setup_args={"include_dirs": np.get_include()})
 from opencood.utils.cython.transformation_utils import GetPairwiseTransformation, X1ToX2
 
@@ -46,12 +47,30 @@ def _GetEgoCAVInfo(base_data_dict):
     return -1, [], None
 
 
+def _GetLidarPoses(base_data_dict, legalCAVIdList):
+    """从base_data_dict中获取lidar_pose和lidar_pose_clean，并转换为NumPy数组"""
+    lidar_pose_clean_list, lidar_pose_list = zip(*[
+        (base_data_dict[cav_id].params["lidar_pose_clean"], base_data_dict[cav_id].params["lidar_pose"])
+        for cav_id in legalCAVIdList
+    ])
+    lidar_poses_clean = np.array(lidar_pose_clean_list).reshape(-1, 6)
+    lidar_poses = np.array(lidar_pose_list).reshape(-1, 6)
+    return lidar_poses_clean, lidar_poses
+
+
+def _GetUniqueObjects(object_id_stack, object_stack):
+    """根据object_id_stack获取唯一对象的索引，并返回处理后的object_stack"""
+    unique_indices, object_stack = [object_id_stack.index(x) for x in set(object_id_stack)], np.vstack(object_stack)
+    object_stack = object_stack[unique_indices]
+    return [object_id_stack[i] for i in unique_indices], object_stack
+
+
 class InterHeteroFusionDataset(Dataset):
     """
     删除一些看不懂的标志变量, 以及一些对于其他类型的数据集的处理
     """
 
-    def __init__(self, params, visualize, train, baseDataset):
+    def __init__(self, params, visualize, train, baseDataset: OPV2VDataset):
         super().__init__()
         self.params = params
         self.visualize, self.train, self.hetero = visualize, train, True
@@ -86,23 +105,22 @@ class InterHeteroFusionDataset(Dataset):
 
         self.baseDataset.reinitialize()
 
+    def __len__(self):
+        return self.baseDataset.__len__()
+
     def _ProcessLidarData(self, cavData: CAVData, sensor_type, modality_name, transformation_matrix: np.ndarray[np.float64]):
         lidar_np = ProcessPointsUsingCython(cavData.lidar_np)  # shape: (点云数量, 4)
-
-        selected_cav_processed = {}
+        processedCAVData = {}
         if self.visualize:  # filter lidar
             # 对点云坐标进行投影 (不包括最后一维, 最后一维是反射强度) 为了使用 cython 这里与 `lidar_np` 的 dtype 保持一致
             # project the lidar to ego space x, y, z in ego space
-            projected_lidar = box_utils.ProjectPointsByMatrixUsingCython(
+            processedCAVData["projected_lidar"] = box_utils.ProjectPointsByMatrixUsingCython(
                 lidar_np[:, :3], transformation_matrix.astype(np.float32)
             )
-            selected_cav_processed.update({"projected_lidar": projected_lidar})
 
         if sensor_type == "lidar":
-            processed_lidar = self.preprocessor[modality_name].preprocess(lidar_np)
-            selected_cav_processed.update({f"processed_features_{modality_name}": processed_lidar})
-
-        return selected_cav_processed
+            processedCAVData[f"processed_features_{modality_name}"] = self.preprocessor[modality_name].preprocess(lidar_np)
+        return processedCAVData
 
     def _ProcessCameraData(self, selected_cav_base, modality_name):
         camera_data_list, params = selected_cav_base["camera_data"], selected_cav_base["params"]
@@ -182,41 +200,36 @@ class InterHeteroFusionDataset(Dataset):
 
         # calculate the transformation matrix 向自车看齐
         transformation_matrix = X1ToX2(cavData.params["lidar_pose"], ego_pose)
-        transformation_matrix_clean = X1ToX2(cavData.params["lidar_pose_clean"], ego_pose_clean)
-
+        # transformation_matrix_clean = X1ToX2(cavData.params["lidar_pose_clean"], ego_pose_clean)
         modality_name = cavData.modality_name
         sensor_type = self.sensor_type_dict[modality_name]
 
-        # lidar
         if sensor_type == "lidar" or self.visualize:
             processedCAVData.update(self._ProcessLidarData(cavData, sensor_type, modality_name, transformation_matrix))
+        if sensor_type == "camera":
+            processedCAVData[f"image_inputs_{modality_name}"] = self._ProcessCameraData(cavData, modality_name)
 
         # generate targets label single GT, note the reference pose is itself.
-        object_bbx_center, object_bbx_mask, object_ids = self.generate_object_center([cavData], cavData.params["lidar_pose"])
+        single_object_bbx_center, single_object_bbx_mask, _ = self.generate_object_center([cavData], cavData.params["lidar_pose"]) # fmt: skip
+        single_label_dict = self.baseDataset.post_processor.GenerateLabel(single_object_bbx_center, self.anchor_box, single_object_bbx_mask) # fmt: skip
 
-        label_dict = self.baseDataset.post_processor.GenerateLabel(object_bbx_center, self.anchor_box, object_bbx_mask)
-        processedCAVData.update({
-            "single_label_dict": label_dict,
-            "single_object_bbx_center": object_bbx_center,
-            "single_object_bbx_mask": object_bbx_mask,
-        })
-
-        # camera
-        if sensor_type == "camera":
-            processedCAVData.update({f"image_inputs_{modality_name}": self._ProcessCameraData(cavData, modality_name)})
-
-        # anchor box
-        processedCAVData.update({"anchor_box": self.anchor_box})
-
-        # note the reference pose ego
         object_bbx_center, object_bbx_mask, object_ids = self.generate_object_center([cavData], ego_pose_clean)
 
         processedCAVData.update({
+            # 单车的标签
+            "single_label_dict": single_label_dict,
+            "single_object_bbx_center": single_object_bbx_center,
+            "single_object_bbx_mask": single_object_bbx_mask,
+            # 其他车与自车的标签
             "object_bbx_center": object_bbx_center[object_bbx_mask == 1],
             "object_bbx_mask": object_bbx_mask,
             "object_ids": object_ids,
-            "transformation_matrix": transformation_matrix,
-            "transformation_matrix_clean": transformation_matrix_clean,
+            # 这些数据看起来没有被用到, 所以就先注释掉了
+            # anchor box
+            # "anchor_box": self.anchor_box,
+            # 两种类型的转换矩阵
+            # "transformation_matrix": transformation_matrix,
+            # "transformation_matrix_clean": transformation_matrix_clean,
         })
 
         return processedCAVData
@@ -242,18 +255,8 @@ class InterHeteroFusionDataset(Dataset):
         # first find the ego vehicle's lidar pose
         ego_id, ego_pose, ego_pose_clean, ego_cav_base = _GetEgoCAVInfo(base_data_dict)
         legalCAVIdList = self._GetLegalCAVIds(base_data_dict, ego_pose)
-
         if len(legalCAVIdList) == 0:
             return None
-
-        inputListModalities = {f"m{i}": [] for i in range(4)}  # can contain lidar or camera
-
-        agent_modality_list = []
-        object_stack = []
-        object_id_stack = []
-        single_label_list = []
-        single_object_bbx_center_list = []
-        single_object_bbx_mask_list = []
 
         if self.visualize:
             projected_lidar_stack = []
@@ -262,25 +265,17 @@ class InterHeteroFusionDataset(Dataset):
             input_list_m3_proj = []
             input_list_m4_proj = []
 
-        lidar_pose_clean_list, lidar_pose_list = zip(*[
-            (base_data_dict[cav_id].params["lidar_pose_clean"], base_data_dict[cav_id].params["lidar_pose"])
-            for cav_id in legalCAVIdList
-        ])
-        lidar_poses, lidar_poses_clean = np.array(lidar_pose_list).reshape(-1, 6), np.array(lidar_pose_clean_list).reshape(-1, 6) # fmt: skip
-
-        # TODO: 这里或许直接传递 `lidar_poses` 会更好, 但是该怎么做呢?
-        pairwise_t_matrix = GetPairwiseTransformation(base_data_dict, self.baseDataset.MaxCAV, False)
-
-        # merge preprocessed features from different cavs into the same dict
-        cav_num = len(legalCAVIdList)
+        inputListModalities = {f"m{i}": [] for i in range(4)}  # can contain lidar or camera
+        agent_modality_list, object_stack, object_id_stack = [], [], []  # 多车所需要的数据
+        single_label_list, single_object_bbx_center_list, single_object_bbx_mask_list = [], [], []  # 单车所需要的一系列数据
 
         for _i, cav_id in enumerate(legalCAVIdList):
             legalCAVData = base_data_dict[cav_id]
             modality_name = legalCAVData.modality_name
             sensor_type = self.sensor_type_dict[modality_name]
 
-            # TODO: 这个 generate_object_center 的作用是什么呢?
-            # dynamic object center generator! for heterogeneous input
+            if sensor_type not in {"lidar", "camera"}:
+                raise TypeError(f"Not support this type of this sensor: {sensor_type}")
 
             if self.visualize:
                 self.generate_object_center = self.baseDataset.GenerateObjectCenter
@@ -291,54 +286,34 @@ class InterHeteroFusionDataset(Dataset):
 
             selected_cav_processed = self.get_item_single_car(legalCAVData, ego_pose, ego_pose_clean)
 
+            inputListModalities[modality_name].append(selected_cav_processed[f"processed_features_{modality_name}"])
+
+            # 整合多车数据
+            agent_modality_list.append(modality_name)
             object_stack.append(selected_cav_processed["object_bbx_center"])
             object_id_stack += selected_cav_processed["object_ids"]
 
-            match sensor_type:
-                case "lidar":
-                    inputListModalities[modality_name].append(selected_cav_processed[f"processed_features_{modality_name}"])
-                case "camera":
-                    inputListModalities[modality_name].append(selected_cav_processed[f"processed_features_{modality_name}"])
-                case _:
-                    raise TypeError("错误的传感器类型!")
-
-            agent_modality_list.append(modality_name)
+            # 整合单车数据
+            single_label_list.append(selected_cav_processed["single_label_dict"])
+            single_object_bbx_center_list.append(selected_cav_processed["single_object_bbx_center"])
+            single_object_bbx_mask_list.append(selected_cav_processed["single_object_bbx_mask"])
 
             if self.visualize:
-                # heterogeneous setting do not support disconet' kd
                 projected_lidar_stack.append(selected_cav_processed["projected_lidar"])
-                if sensor_type == "lidar" and self.kd_flag:
-                    eval(f"input_list_{modality_name}_proj").append(
-                        selected_cav_processed[f"processed_features_{modality_name}_proj"]
-                    )
 
-            if self.hetero:
-                single_label_list.append(selected_cav_processed["single_label_dict"])
-                single_object_bbx_center_list.append(selected_cav_processed["single_object_bbx_center"])
-                single_object_bbx_mask_list.append(selected_cav_processed["single_object_bbx_mask"])
+        # 整合单车数据
+        single_label_dicts = self.baseDataset.post_processor.collate_batch(single_label_list)
+        single_object_bbx_center = torch.from_numpy(np.array(single_object_bbx_center_list))
+        single_object_bbx_mask = torch.from_numpy(np.array(single_object_bbx_mask_list))
 
-        # generate single view GT label
-        if self.hetero:
-            single_label_dicts = self.baseDataset.post_processor.collate_batch(single_label_list)
-            single_object_bbx_center = torch.from_numpy(np.array(single_object_bbx_center_list))
-            single_object_bbx_mask = torch.from_numpy(np.array(single_object_bbx_mask_list))
-            processed_data_dict["ego"].update({
-                "single_label_dict_torch": single_label_dicts,
-                "single_object_bbx_center_torch": single_object_bbx_center,
-                "single_object_bbx_mask_torch": single_object_bbx_mask,
-            })
-
-        # exclude all repetitive objects, OPV2V-H
-        unique_indices = [object_id_stack.index(x) for x in set(object_id_stack)]
-        object_stack = np.vstack(object_stack)
-        object_stack = object_stack[unique_indices]
+        object_id_stack, object_stack = _GetUniqueObjects(object_id_stack, object_stack)
 
         # make sure bounding boxes across all frames have the same number
-        object_bbx_center = np.zeros((self.params["postprocess"]["max_num"], 7))
-        mask = np.zeros(self.params["postprocess"]["max_num"], dtype=np.int64)
-        object_bbx_center[: object_stack.shape[0], :] = object_stack
-        mask[: object_stack.shape[0]] = 1
+        max_num = self.params["postprocess"]["max_num"]
+        object_bbx_center, mask = np.zeros((max_num, 7)), np.zeros(max_num, dtype=np.int64)
+        object_bbx_center[: object_stack.shape[0], :], mask[: object_stack.shape[0]] = object_stack, 1
 
+        # 这一段代码我看不懂这是在干什么
         for modality_name in self.modality_name_list:
             if self.sensor_type_dict[modality_name] == "lidar":
                 merged_feature_dict = merge_features_to_dict(inputListModalities[modality_name])
@@ -347,28 +322,32 @@ class InterHeteroFusionDataset(Dataset):
                 merged_image_inputs_dict = merge_features_to_dict(eval(f"input_list_{modality_name}"), merge="stack")
                 processed_data_dict["ego"].update({f"input_{modality_name}": merged_image_inputs_dict})  # maybe None
 
-        processed_data_dict["ego"].update({"agent_modality_list": agent_modality_list})
-
         # generate targets label
         label_dict = self.baseDataset.post_processor.GenerateLabel(object_bbx_center, self.anchor_box, mask)
+        lidar_poses_clean, lidar_poses = _GetLidarPoses(base_data_dict, legalCAVIdList)
 
         processed_data_dict["ego"].update({
+            # 单车信息
+            "single_label_dict_torch": single_label_dicts,
+            "single_object_bbx_center_torch": single_object_bbx_center,
+            "single_object_bbx_mask_torch": single_object_bbx_mask,
+            # 多车信息
+            "agent_modality_list": agent_modality_list,
             "object_bbx_center": object_bbx_center,
             "object_bbx_mask": mask,
-            "object_ids": [object_id_stack[i] for i in unique_indices],
+            "object_ids": object_id_stack,
             "anchor_box": self.anchor_box,
             "label_dict": label_dict,
-            "cav_num": cav_num,
-            "pairwise_t_matrix": pairwise_t_matrix,
+            "cav_num": len(legalCAVIdList),
+            "pairwise_t_matrix": GetPairwiseTransformation(base_data_dict, self.baseDataset.MaxCAV, False),
             "lidar_poses_clean": lidar_poses_clean,
             "lidar_poses": lidar_poses,
+            "sample_idx": idx,
+            "cav_id_list": legalCAVIdList,
         })
 
-        # TODO: 我不太明白这里为什么会将 `sample_idx` 和 `cav_id_list` 单独写到后面添加, 是为了保持 processed_data_dict 字典顺序?
         if self.visualize:
             processed_data_dict["ego"].update({"origin_lidar": np.vstack(projected_lidar_stack)})
-
-        processed_data_dict["ego"].update({"sample_idx": idx, "cav_id_list": legalCAVIdList})
 
         return processed_data_dict
 
@@ -376,9 +355,8 @@ class InterHeteroFusionDataset(Dataset):
         # Intermediate fusion is different the other two
         output_dict = {"ego": {}}
 
-        object_bbx_center = []
-        object_bbx_mask = []
-        object_ids = []
+        object_bbx_center, object_bbx_mask, object_ids = [], [], []
+
         inputsListModalities = {f"m{i}": [] for i in range(4)}
 
         agent_modality_list = []
@@ -389,82 +367,73 @@ class InterHeteroFusionDataset(Dataset):
         origin_lidar = []
         lidar_pose_clean_list = []
 
-        # pairwise transformation matrix
-        pairwise_t_matrix_list = []
+        pairwise_t_matrix_list = []  # pairwise transformation matrix
 
-        ### 2022.10.10 single gt ####
-        if self.hetero:
-            pos_equal_one_single = []
-            neg_equal_one_single = []
-            targets_single = []
-            object_bbx_center_single = []
-            object_bbx_mask_single = []
+        # 单车数据
+        pos_equal_one_single, neg_equal_one_single, targets_single, object_bbx_center_single, object_bbx_mask_single = [], [], [], [], [] # fmt: skip
 
-        for i in range(len(batch)):
-            ego_dict = batch[i]["ego"]
+        # 整合每个 batch 里面的这些数据
+        for data in batch:
+            ego_dict = data["ego"]
             object_bbx_center.append(ego_dict["object_bbx_center"])
             object_bbx_mask.append(ego_dict["object_bbx_mask"])
             object_ids.append(ego_dict["object_ids"])
             lidar_pose_list.append(ego_dict["lidar_poses"])  # ego_dict['lidar_pose'] is np.ndarray [N,6]
             lidar_pose_clean_list.append(ego_dict["lidar_poses_clean"])
-
+            agent_modality_list.extend(ego_dict["agent_modality_list"])
+            record_len.append(ego_dict["cav_num"])
+            label_dict_list.append(ego_dict["label_dict"])
+            pairwise_t_matrix_list.append(ego_dict["pairwise_t_matrix"])
+            if self.visualize:
+                origin_lidar.append(ego_dict["origin_lidar"])
+            # 单车
+            pos_equal_one_single.append(ego_dict["single_label_dict_torch"]["pos_equal_one"])
+            neg_equal_one_single.append(ego_dict["single_label_dict_torch"]["neg_equal_one"])
+            targets_single.append(ego_dict["single_label_dict_torch"]["targets"])
+            object_bbx_center_single.append(ego_dict["single_object_bbx_center_torch"])
+            object_bbx_mask_single.append(ego_dict["single_object_bbx_mask_torch"])
+            # 不同模态的数据
             for modality_name in self.modality_name_list:
                 if ego_dict[f"input_{modality_name}"] is not None:
                     inputsListModalities[modality_name].append(ego_dict[f"input_{modality_name}"])  # {} if empty?
 
-            agent_modality_list.extend(ego_dict["agent_modality_list"])
-
-            record_len.append(ego_dict["cav_num"])
-            label_dict_list.append(ego_dict["label_dict"])
-            pairwise_t_matrix_list.append(ego_dict["pairwise_t_matrix"])
-
-            if self.visualize:
-                origin_lidar.append(ego_dict["origin_lidar"])
-
-            ### 2022.10.10 single gt ####
-            if self.hetero:
-                pos_equal_one_single.append(ego_dict["single_label_dict_torch"]["pos_equal_one"])
-                neg_equal_one_single.append(ego_dict["single_label_dict_torch"]["neg_equal_one"])
-                targets_single.append(ego_dict["single_label_dict_torch"]["targets"])
-                object_bbx_center_single.append(ego_dict["single_object_bbx_center_torch"])
-                object_bbx_mask_single.append(ego_dict["single_object_bbx_mask_torch"])
-
         # convert to numpy, (B, max_num, 7)
-        object_bbx_center = torch.from_numpy(np.array(object_bbx_center))
-        object_bbx_mask = torch.from_numpy(np.array(object_bbx_mask))
-
-        # 2023.2.5
-        for modality_name in self.modality_name_list:
-            if len(inputsListModalities[modality_name]) != 0:
-                if self.sensor_type_dict[modality_name] == "lidar":
-                    merged_feature_dict = merge_features_to_dict(inputsListModalities[modality_name])
-                    processed_lidar_torch_dict = self.preprocessor[modality_name].collate_batch(merged_feature_dict)
-                    output_dict["ego"].update({f"inputs_{modality_name}": processed_lidar_torch_dict})
-
-                elif self.sensor_type_dict[modality_name] == "camera":
-                    merged_image_inputs_dict = merge_features_to_dict(eval(f"inputs_list_{modality_name}"), merge="cat")
-                    output_dict["ego"].update({f"inputs_{modality_name}": merged_image_inputs_dict})
-
-        output_dict["ego"].update({"agent_modality_list": agent_modality_list})
-
+        object_bbx_center, object_bbx_mask = torch.from_numpy(np.array(object_bbx_center)), torch.from_numpy(np.array(object_bbx_mask)) # fmt: skip
+        pairwise_t_matrix = torch.from_numpy(np.array(pairwise_t_matrix_list))  # (B, max_cav)
         record_len = torch.from_numpy(np.array(record_len, dtype=int))
         lidar_pose = torch.from_numpy(np.concatenate(lidar_pose_list, axis=0))
         lidar_pose_clean = torch.from_numpy(np.concatenate(lidar_pose_clean_list, axis=0))
         label_torch_dict = self.baseDataset.post_processor.collate_batch(label_dict_list)
 
         # for centerpoint
-        label_torch_dict.update({"object_bbx_center": object_bbx_center, "object_bbx_mask": object_bbx_mask})
+        # 这里为什么要重复填写呢？这里暂时先注释掉看一看
+        # label_torch_dict.update({
+        #     "object_bbx_center": object_bbx_center,
+        #     "object_bbx_mask": object_bbx_mask,
+        #     # add pairwise_t_matrix to label dict
+        #     "pairwise_t_matrix": pairwise_t_matrix,
+        #     "record_len": record_len,
+        # })
 
-        # (B, max_cav)
-        pairwise_t_matrix = torch.from_numpy(np.array(pairwise_t_matrix_list))
-
-        # add pairwise_t_matrix to label dict
-        label_torch_dict["pairwise_t_matrix"] = pairwise_t_matrix
-        label_torch_dict["record_len"] = record_len
+        for modality_name in self.modality_name_list:
+            if len(inputsListModalities[modality_name]) != 0:
+                if self.sensor_type_dict[modality_name] == "lidar":
+                    merged_feature_dict = merge_features_to_dict(inputsListModalities[modality_name])
+                    processed_lidar_torch_dict = self.preprocessor[modality_name].collate_batch(merged_feature_dict)
+                    if processed_lidar_torch_dict["voxel_coords"].shape[0] == 0:
+                        print(1)
+                        print(processed_lidar_torch_dict)
+                        breakpoint()
+                        raise Exception
+                    output_dict["ego"].update({f"inputs_{modality_name}": processed_lidar_torch_dict})
+                elif self.sensor_type_dict[modality_name] == "camera":
+                    merged_image_inputs_dict = merge_features_to_dict(eval(f"inputs_list_{modality_name}"), merge="cat")
+                    output_dict["ego"].update({f"inputs_{modality_name}": merged_image_inputs_dict})
 
         # object id is only used during inference, where batch size is 1.
         # so here we only get the first element.
         output_dict["ego"].update({
+            "agent_modality_list": agent_modality_list,
             "object_bbx_center": object_bbx_center,
             "object_bbx_mask": object_bbx_mask,
             "record_len": record_len,
@@ -474,26 +443,23 @@ class InterHeteroFusionDataset(Dataset):
             "lidar_pose_clean": lidar_pose_clean,
             "lidar_pose": lidar_pose,
             "anchor_box": self.anchor_box_torch,
+            # 单车数据
+            "label_dict_single": {
+                "pos_equal_one": torch.cat(pos_equal_one_single, dim=0),
+                "neg_equal_one": torch.cat(neg_equal_one_single, dim=0),
+                "targets": torch.cat(targets_single, dim=0),
+                # for centerpoint
+                "object_bbx_center_single": torch.cat(object_bbx_center_single, dim=0),
+                "object_bbx_mask_single": torch.cat(object_bbx_mask_single, dim=0),
+            },
+            # "object_bbx_center_single": torch.cat(object_bbx_center_single, dim=0),
+            # "object_bbx_mask_single": torch.cat(object_bbx_mask_single, dim=0),
         })
 
         if self.visualize:
             origin_lidar = np.array(downsample_lidar_minimum(pcd_np_list=origin_lidar))
             origin_lidar = torch.from_numpy(origin_lidar)
             output_dict["ego"].update({"origin_lidar": origin_lidar})
-
-        if self.hetero:
-            output_dict["ego"].update({
-                "label_dict_single": {
-                    "pos_equal_one": torch.cat(pos_equal_one_single, dim=0),
-                    "neg_equal_one": torch.cat(neg_equal_one_single, dim=0),
-                    "targets": torch.cat(targets_single, dim=0),
-                    # for centerpoint
-                    "object_bbx_center_single": torch.cat(object_bbx_center_single, dim=0),
-                    "object_bbx_mask_single": torch.cat(object_bbx_mask_single, dim=0),
-                },
-                "object_bbx_center_single": torch.cat(object_bbx_center_single, dim=0),
-                "object_bbx_mask_single": torch.cat(object_bbx_mask_single, dim=0),
-            })
 
         return output_dict
 

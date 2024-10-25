@@ -202,13 +202,14 @@ class BasePostprocessor(object):
         # 使用 ChainMap 合并多个字典，避免重复创建中间字典
         tmp_object_dict: Dict[int, np.ndarray] = dict(ChainMap(*(cav_content.params["vehicles"] for cav_content in cav_contents))) # fmt: skip
 
-        output_dict: Dict[int, np.ndarray] = box_utils_cython.ProjectWorldObjects(
+        output_dict: Dict[int, np.ndarray[np.float64]] = box_utils_cython.ProjectWorldObjects(
             tmp_object_dict, np.array(reference_lidar_pose), self.filter_range_numpy, self.order, enlarge_z
         )
         numObjs = min(len(output_dict), self.maxNum)
 
         object_np, mask, object_ids = np.zeros((self.maxNum, 7)), np.zeros(self.maxNum), list(output_dict.keys())[:numObjs]
-        object_np[:numObjs], mask[:numObjs] = np.array([output_dict[objId][0, :] for objId in object_ids]), np.ones(numObjs)
+        if numObjs != 0:  # 需要对 `0` 这种情况做一个特殊处理
+            object_np[:numObjs], mask[:numObjs] = np.array([output_dict[objId][0, :] for objId in object_ids]), np.ones(numObjs)
 
         return object_np, mask.astype(np.int64), object_ids
 

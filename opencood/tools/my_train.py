@@ -5,6 +5,7 @@
 import argparse
 import os
 import statistics
+import time
 
 import torch
 from tensorboardX import SummaryWriter
@@ -14,6 +15,9 @@ import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.data_utils.datasets.base_datasets.opv2v_dataset import OPV2VDataset
 from opencood.data_utils.datasets.fusion_dataset.inter_hetero_fusion_dataset import InterHeteroFusionDataset
 from opencood.tools import train_utils
+from opencood.utils.logger import get_logger
+
+logger = get_logger()
 
 
 def train_parser():
@@ -38,6 +42,7 @@ def _LoadModules(model_dir, hypes, model, optimizer):
         saved_path = model_dir
         init_epoch, model = train_utils.load_saved_model(saved_path, model)
         lowest_val_epoch = init_epoch
+        logger.important(f"resume from {init_epoch} epoch.")
     else:
         saved_path = train_utils.setup_train(hypes)
         init_epoch, lowest_val_epoch = 0, -1
@@ -46,7 +51,7 @@ def _LoadModules(model_dir, hypes, model, optimizer):
     return saved_path, init_epoch, lowest_val_epoch, model, scheduler
 
 
-def _TrainOneEpoch(dataloader, device, epoch, writer, hypes, supervise_signle_flag, model, optimizer, criterion):
+def _TrainOneEpoch(dataloader, device, epoch, writer, model, optimizer, criterion):
     length = len(dataloader)
     for i, batch_data in enumerate(dataloader):
         if batch_data is None or batch_data["ego"]["object_bbx_mask"].sum() == 0:
@@ -59,12 +64,6 @@ def _TrainOneEpoch(dataloader, device, epoch, writer, hypes, supervise_signle_fl
 
         final_loss = criterion(output_dict, batch_data["ego"]["label_dict"])
         criterion.logging(epoch, i, length, writer)
-
-        if supervise_signle_flag:
-            final_loss += criterion(output_dict, batch_data["ego"]["label_dict_single"], suffix="_single") * hypes[
-                "train_params"
-            ].get("signle_weight", 1)
-            criterion.logging(epoch, i, length, writer, suffix="_single")
 
         final_loss.backward()
         optimizer.step()
@@ -106,29 +105,29 @@ def main():
     opt = train_parser()
     hypes = yaml_utils.load_yaml(opt.hypes_yaml, opt)
 
-    print("Dataset Building")
+    logger.important("Dataset Building")
     trainDataset = InterHeteroFusionDataset(hypes, False, True, OPV2VDataset)
     evalDataset = InterHeteroFusionDataset(hypes, False, False, OPV2VDataset)
 
-    trainDataset, evalDataset = Subset(trainDataset, range(0, 100)), Subset(evalDataset, range(0, 100))
+    # trainDataset, evalDataset = Subset(trainDataset, range(0, 100)), Subset(evalDataset, range(0, 100))
 
     train_loader = DataLoader(
         trainDataset,
         batch_size=hypes["train_params"]["batch_size"],
-        num_workers=1,
-        collate_fn=trainDataset.dataset.collate_batch_train,  # WARNING: 如果想要全部数据进行训练需要修改这里
+        num_workers=4,
+        collate_fn=trainDataset.collate_batch_train,  # WARNING: 如果想要全部数据进行训练需要修改这里
         shuffle=True,
-        pin_memory=False,  # 这里先改成 False, 先跑起来再说
+        pin_memory=True,  # 这里先改成 False, 先跑起来再说
         drop_last=True,
         prefetch_factor=2,
     )
     val_loader = DataLoader(
         evalDataset,
         batch_size=hypes["train_params"]["batch_size"],
-        num_workers=1,
-        collate_fn=trainDataset.dataset.collate_batch_train,  # WARNING: 如果想要全部数据进行训练需要修改这里
+        num_workers=4,
+        collate_fn=trainDataset.collate_batch_train,  # WARNING: 如果想要全部数据进行训练需要修改这里
         shuffle=True,
-        pin_memory=False,  # 这里先改成 False, 先跑起来再说
+        pin_memory=True,  # 这里先改成 False, 先跑起来再说
         drop_last=True,
         prefetch_factor=2,
     )
@@ -138,7 +137,7 @@ def main():
     # record lowest validation loss checkpoint.
     lowest_val_loss, lowest_val_epoch = 1e5, -1
 
-    print("Creating Model")
+    logger.important("数据集加载完毕, 开始创建模型")
     model, criterion, optimizer, scheduler = _BuildModules(hypes)
     # if we want to train from last checkpoint.
     saved_path, init_epoch, lowest_val_epoch, model, scheduler = _LoadModules(opt.model_dir, hypes, model, optimizer)
@@ -148,12 +147,15 @@ def main():
     # record training
     writer = SummaryWriter(saved_path)
 
-    print("Training start")
     epoches = hypes["train_params"]["epoches"]
-    supervise_single_flag = False if not hasattr(trainDataset, "supervise_single") else trainDataset.supervise_single
-    # used to help schedule learning rate
 
+    # used to help schedule learning rate
+    usingTimeList = []
+    logger.important("开始循环")
     for epoch in range(init_epoch, max(epoches, init_epoch)):
+        startTime = time.time()
+
+        trainDataset.baseDataset.reinitialize()
         for param_group in optimizer.param_groups:
             print("learning rate %f" % param_group["lr"])
         # the model will be evaluation mode during validation
@@ -162,7 +164,8 @@ def main():
             model.model_train_init()
         except:
             print("No model_train_init function")
-        _TrainOneEpoch(train_loader, device, epoch, writer, hypes, supervise_single_flag, model, optimizer, criterion)
+
+        _TrainOneEpoch(train_loader, device, epoch, writer, model, optimizer, criterion)
 
         if epoch % hypes["train_params"]["save_freq"] == 0:
             torch.save(model.state_dict(), os.path.join(saved_path, "net_epoch%d.pth" % (epoch + 1)))
@@ -174,10 +177,12 @@ def main():
             )
 
         scheduler.step()
+        usingTime = time.time() - startTime
+        usingTimeList.append(usingTime)
+        logger.important(f"{epoch} 训练和评估时长: {usingTime}s")
 
-        trainDataset.dataset.reinitialize()  # WARNING: 如果想要全部数据进行训练需要修改这里
-
-    print("Training Finished, checkpoints saved to %s" % saved_path)
+    logger.important(f"总训练时长: {sum(usingTimeList)}s, 一轮平均耗时: {sum(usingTimeList) / len(usingTimeList)}s")
+    logger.important(f"Training Finished, checkpoints saved to {saved_path}")
 
     run_test = True
     if run_test:

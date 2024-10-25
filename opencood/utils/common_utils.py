@@ -68,7 +68,7 @@ def merge_features_to_dict(processed_feature_list, merge=None):
     if len(processed_feature_list) == 0:
         return None
 
-    merged_feature_dict = OrderedDict()
+    merged_feature_dict = {}  # TODO
 
     for i in range(len(processed_feature_list)):
         for feature_name, feature in processed_feature_list[i].items():

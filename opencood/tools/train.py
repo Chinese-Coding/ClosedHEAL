@@ -113,7 +113,7 @@ def main():
         opencood_train_dataset,
         batch_size=hypes["train_params"]["batch_size"],
         num_workers=4,
-        collate_fn=opencood_train_dataset.dataset.collate_batch_train,  # WARNING: 如果想要全部数据进行训练需要修改这里
+        collate_fn=opencood_train_dataset.collate_batch_train,  # WARNING: 如果想要全部数据进行训练需要修改这里
         shuffle=True,
         pin_memory=False,  # 这里先改成 False, 先跑起来再说
         drop_last=True,
@@ -123,7 +123,7 @@ def main():
         opencood_validate_dataset,
         batch_size=hypes["train_params"]["batch_size"],
         num_workers=4,
-        collate_fn=opencood_train_dataset.dataset.collate_batch_train,  # WARNING: 如果想要全部数据进行训练需要修改这里
+        collate_fn=opencood_train_dataset.collate_batch_train,  # WARNING: 如果想要全部数据进行训练需要修改这里
         shuffle=True,
         pin_memory=False,  # 这里先改成 False, 先跑起来再说
         drop_last=True,
@@ -150,6 +150,7 @@ def main():
     supervise_single_flag = (
         False if not hasattr(opencood_train_dataset, "supervise_single") else opencood_train_dataset.supervise_single
     )
+    print(supervise_single_flag)
     # used to help schedule learning rate
 
     for epoch in range(init_epoch, max(epoches, init_epoch)):
@@ -175,7 +176,7 @@ def main():
 
         scheduler.step()
 
-        opencood_train_dataset.dataset.reinitialize()  # WARNING: 如果想要全部数据进行训练需要修改这里
+        opencood_train_dataset.reinitialize()  # WARNING: 如果想要全部数据进行训练需要修改这里
 
     print("Training Finished, checkpoints saved to %s" % saved_path)
 

@@ -312,4 +312,8 @@ PYTHONPATH=/home/zfq/Desktop/OriginHEAL:$PYTHONPATH ppython opencood/tools/train
  
 PYTHONPATH=/home/zfq/Desktop/OriginHEAL:$PYTHONPATH python opencood/tools/train.py -y None --model_dir opencood/logs/HEAL_m1_based/stage2/m2_alignto_m1
 
+PYTHONPATH=/home/zfq/Desktop/OriginHEAL:$PYTHONPATH python opencood/tools/inference.py --model_dir opencood/logs/HEAL_m1_based/stage1/m1_base --fusion_method intermediata
+
+PYTHONPATH=/home/zfq/Desktop/OriginHEAL:$PYTHONPATH python opencood/tools/my_train.py -y None --model_dir opencood/logs/my_train/stage1
+ 
 ```

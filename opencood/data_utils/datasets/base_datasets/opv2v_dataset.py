@@ -19,7 +19,10 @@ from opencood.data_utils.post_processor import build_postprocessor
 from opencood.data_utils.pre_processor import build_preprocessor
 from opencood.hypes_yaml.yaml_utils import load_yaml
 from opencood.utils.camera_utils import load_camera_data
+from opencood.utils.logger import get_logger
 from opencood.utils.transformation_utils import x1_to_x2
+
+logger = get_logger()
 
 
 def _GetTimestampDataPath(cavPath: Path, timestamp: str):
@@ -69,7 +72,8 @@ class OPV2VDataset(Dataset):
         self.data_augmentor = DataAugmentor(params["data_augment"], train) if "data_augment" in params else None
 
         root_dir = params["root_dir"] if self.train else params["validate_dir"]
-        print("Dataset dir:", root_dir)
+
+        logger.important(f"从 {root_dir} 中加载数据")
 
         # 来自GPT: 冗余的默认值处理
         self.max_cav = params.get("train_params", {}).get("max_cav", 5)
@@ -110,6 +114,10 @@ class OPV2VDataset(Dataset):
         return self.max_cav
 
     def reinitialize(self):
+        # 每次初始化的时候记得清空之前存储的东西 (如果是第一次初始化可能不需要, 但是为了统一写法就不做判断了)
+        self.scenario_database.clear()
+        self.len_record.clear()
+
         # loop over all scenarios
         for i, scenario_folder in enumerate(self.scenario_folders):
             self.scenario_database.append({})
@@ -138,7 +146,7 @@ class OPV2VDataset(Dataset):
             # loop over all CAV data
             for j, cav_id in enumerate(cav_list):
                 if j > self.max_cav - 1:
-                    print("too many cavs reinitialize")
+                    logger.warning(f"In {scenario_folder.stem}, there are too many cavs reinitialize.")
                     break
                 self.scenario_database[i][cav_id] = {}
 
@@ -147,9 +155,11 @@ class OPV2VDataset(Dataset):
 
                 yaml_files: List[Path] = sorted(file for file in cav_path.glob("*.yaml") if "additional" not in file.stem)
                 # this timestamp is not ready
+                # fmt: off
                 yaml_files = [
-                    x for x in yaml_files if not ("2021_08_20_21_10_24" in (path_str := str(x)) and "000265" in path_str)
-                ]
+                    x for x in yaml_files
+                    if not (("2021_08_20_21_10_24" in (path_str := str(x)) and "000265" in path_str) or "2021_09_09_13_20_58" in path_str)
+                ]  # fmt: on
                 timestamps = [file.stem for file in yaml_files]  # 来自GPT: 把提取 timestamp 函数删掉了 (一行代码完事)
 
                 for timestamp in timestamps:
@@ -181,7 +191,8 @@ class OPV2VDataset(Dataset):
                     self.len_record.append(total_len + len(timestamps))
                 else:
                     self.scenario_database[i][cav_id]["ego"] = False
-        print("len:", self.len_record[-1])
+        prefix = "训练集" if self.train else "验证集"
+        logger.important(f"{prefix}数据总长度: {self.len_record[-1]}")
 
     def _GetScenarioIndex(self, idx):
         """Find the correct scenario index based on idx."""

@@ -17,6 +17,7 @@ target-version = ["py311"]
 python = "^3.11"
 black = "^24.8.0"
 pydantic = "^2.9.2"
+loguru = "^0.7.2"
 
 
 [build-system]
