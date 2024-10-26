@@ -10,12 +10,12 @@ Each agent should retrieve the objects itself, and merge them by iou,
 instead of using the cooperative label.
 """
 
-import sys
 from typing import Dict
 
 import numpy as np
-import pyximport
 import torch
+from opencood.utils.cython.pcd_utils import ProcessPoints
+from opencood.utils.cython.transformation_utils import GetPairwiseTransformation, X1ToX2
 from torch.utils.data import Dataset
 
 from opencood.data_utils.data_models.dataset_models import CAVData
@@ -31,13 +31,7 @@ from opencood.utils.camera_utils import (
 from opencood.utils.common_utils import merge_features_to_dict
 from opencood.utils.common_utils import read_json
 from opencood.utils.heter_utils import Adaptor
-from opencood.utils.pcd_utils import (
-    downsample_lidar_minimum,
-    ProcessPointsUsingCython,
-)
-
-pyximport.install(language_level=3, setup_args={"include_dirs": np.get_include()})
-from opencood.utils.cython.transformation_utils import GetPairwiseTransformation, X1ToX2
+from opencood.utils.pcd_utils import downsample_lidar_minimum
 
 
 def _GetEgoCAVInfo(base_data_dict):
@@ -109,7 +103,7 @@ class InterHeteroFusionDataset(Dataset):
         return self.baseDataset.__len__()
 
     def _ProcessLidarData(self, cavData: CAVData, sensor_type, modality_name, transformation_matrix: np.ndarray[np.float64]):
-        lidar_np = ProcessPointsUsingCython(cavData.lidar_np)  # shape: (点云数量, 4)
+        lidar_np = ProcessPoints(cavData.lidar_np)  # shape: (点云数量, 4)
         processedCAVData = {}
         if self.visualize:  # filter lidar
             # 对点云坐标进行投影 (不包括最后一维, 最后一维是反射强度) 为了使用 cython 这里与 `lidar_np` 的 dtype 保持一致
@@ -224,12 +218,6 @@ class InterHeteroFusionDataset(Dataset):
             "object_bbx_center": object_bbx_center[object_bbx_mask == 1],
             "object_bbx_mask": object_bbx_mask,
             "object_ids": object_ids,
-            # 这些数据看起来没有被用到, 所以就先注释掉了
-            # anchor box
-            # "anchor_box": self.anchor_box,
-            # 两种类型的转换矩阵
-            # "transformation_matrix": transformation_matrix,
-            # "transformation_matrix_clean": transformation_matrix_clean,
         })
 
         return processedCAVData
@@ -405,16 +393,6 @@ class InterHeteroFusionDataset(Dataset):
         lidar_pose_clean = torch.from_numpy(np.concatenate(lidar_pose_clean_list, axis=0))
         label_torch_dict = self.baseDataset.post_processor.collate_batch(label_dict_list)
 
-        # for centerpoint
-        # 这里为什么要重复填写呢？这里暂时先注释掉看一看
-        # label_torch_dict.update({
-        #     "object_bbx_center": object_bbx_center,
-        #     "object_bbx_mask": object_bbx_mask,
-        #     # add pairwise_t_matrix to label dict
-        #     "pairwise_t_matrix": pairwise_t_matrix,
-        #     "record_len": record_len,
-        # })
-
         for modality_name in self.modality_name_list:
             if len(inputsListModalities[modality_name]) != 0:
                 if self.sensor_type_dict[modality_name] == "lidar":
@@ -452,8 +430,6 @@ class InterHeteroFusionDataset(Dataset):
                 "object_bbx_center_single": torch.cat(object_bbx_center_single, dim=0),
                 "object_bbx_mask_single": torch.cat(object_bbx_mask_single, dim=0),
             },
-            # "object_bbx_center_single": torch.cat(object_bbx_center_single, dim=0),
-            # "object_bbx_mask_single": torch.cat(object_bbx_mask_single, dim=0),
         })
 
         if self.visualize:
@@ -513,7 +489,7 @@ class InterHeteroFusionDataset(Dataset):
         gt_box_tensor : torch.Tensor
             The tensor of gt bounding box.
         """
-        pred_box_tensor, pred_score = self.post_processor.post_process(data_dict, output_dict)
-        gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
+        pred_box_tensor, pred_score = self.baseDataset.post_processor.post_process(data_dict, output_dict)
+        gt_box_tensor = self.baseDataset.post_processor.generate_gt_bbx(data_dict)
 
         return pred_box_tensor, pred_score, gt_box_tensor

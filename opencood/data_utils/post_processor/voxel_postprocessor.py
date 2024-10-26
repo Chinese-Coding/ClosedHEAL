@@ -10,7 +10,6 @@ import math
 import os.path
 
 import numpy as np
-import pyximport
 import torch
 import torch.nn.functional as F
 
@@ -18,7 +17,6 @@ from opencood.data_utils.post_processor.base_postprocessor import BasePostproces
 from opencood.hypes_yaml import yaml_utils
 from opencood.utils import box_utils
 
-pyximport.install(language_level=3, setup_args={"include_dirs": np.get_include()})
 from opencood.utils.cython.box_overlaps import bbox_overlaps
 from opencood.data_utils.post_processor import voxel_cython
 from opencood.utils.common_utils import limit_period

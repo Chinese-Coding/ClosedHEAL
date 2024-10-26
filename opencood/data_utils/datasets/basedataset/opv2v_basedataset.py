@@ -149,9 +149,11 @@ class OPV2VBaseDataset(Dataset):
 
                 yaml_files: List[Path] = sorted(file for file in cav_path.glob("*.yaml") if "additional" not in file.stem)
                 # this timestamp is not ready
+                # fmt: off
                 yaml_files = [
-                    x for x in yaml_files if not ("2021_08_20_21_10_24" in (path_str := str(x)) and "000265" in path_str)
-                ]
+                    x for x in yaml_files
+                    if not (("2021_08_20_21_10_24" in (path_str := str(x)) and "000265" in path_str) or "2021_09_09_13_20_58" in path_str)
+                ]  # fmt: on
                 timestamps = [file.stem for file in yaml_files]  # 来自GPT: 把提取 timestamp 函数删掉了 (一行代码完事)
 
                 for timestamp in timestamps:

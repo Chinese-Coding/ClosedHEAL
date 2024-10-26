@@ -84,11 +84,11 @@ class OPV2VDataset(Dataset):
         self.load_depth_file = "depth" in params["input_source"]
 
         self.label_type = params["label_type"]  # 'lidar' or 'camera'
-        self.generate_object_center = (
+        self.GenerateObjectCenter = (
             self.GenerateObjectCenterLidar if self.label_type == "lidar" else self.generate_object_center_camera
         )
         self.generate_object_center_single = (
-            self.generate_object_center
+            self.GenerateObjectCenter
         )  # will it follows 'self.generate_object_center' when 'self.generate_object_center' change?
 
         if self.load_camera_file:

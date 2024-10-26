@@ -1,12 +1,7 @@
 import numpy as np
-cimport numpy as cnp
+from opencood.utils.cython.all_use cimport cnp, F64_t, I64_t
 
-ctypedef cnp.int32_t I32_t
-ctypedef cnp.int64_t I64_t
-ctypedef cnp.float32_t F32_t
-ctypedef cnp.float64_t F64_t
-
-from opencood.utils.cython import box_utils
+from opencood.utils.cython.box_utils cimport BoxesToCorners3D, Corner2dToStandupBox
 
 cdef _GetAnchorArgs(dict anchorArgs):
     return (
@@ -110,10 +105,10 @@ def GenerateLabel(
     cdef cnp.ndarray[F64_t, ndim=3] gt_box_center_valid3D, anchors_corner
 
     gt_box_center_valid = gt_box_center[masks == 1]                              # (n, 7)
-    gt_box_center_valid3D = box_utils.BoxesToCorners3D(gt_box_center_valid, order) # (n, 8, 3)
-    anchors_corner = box_utils.BoxesToCorners3D(anchors2D, order)                  # (H * W * anchor_num, 8, 3)
-    gt_standup_2d = box_utils.Corner2dToStandupBox(gt_box_center_valid3D)       # (n, 4)
-    anchors_standup_2d = box_utils.Corner2dToStandupBox(anchors_corner)       # (H * W * anchor_num, 4)
+    gt_box_center_valid3D = BoxesToCorners3D(gt_box_center_valid, order) # (n, 8, 3)
+    anchors_corner = BoxesToCorners3D(anchors2D, order)                  # (H * W * anchor_num, 8, 3)
+    gt_standup_2d = Corner2dToStandupBox(gt_box_center_valid3D)       # (n, 4)
+    anchors_standup_2d = Corner2dToStandupBox(anchors_corner)       # (H * W * anchor_num, 4)
 
     cdef cnp.ndarray[I64_t, ndim=1] id_highest, id_highest_gt, id_pos, id_pos_gt, index, id_neg
     cdef cnp.ndarray[F64_t, ndim=2] iou

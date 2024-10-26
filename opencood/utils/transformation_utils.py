@@ -8,13 +8,11 @@ Transformation utils
 from typing import Dict
 
 import numpy as np
-import pyximport
 import torch
 
 from opencood.data_utils.data_models.dataset_models import CAVData
 from opencood.utils.common_utils import check_numpy_to_torch
 
-pyximport.install(language_level=3, setup_args={"include_dirs": np.get_include()})
 from opencood.utils.cython.transformation_utils import X1ToX2
 
 

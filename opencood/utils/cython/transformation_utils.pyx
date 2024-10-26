@@ -1,8 +1,4 @@
 import numpy as np
-cimport numpy as cnp
-
-# 定义类型
-ctypedef cnp.float64_t F64_t
 
 cdef cnp.ndarray[F64_t, ndim=2] XToWorld(cnp.ndarray[F64_t, ndim=1] pose):
     # 提前声明类型，便于优化

@@ -10,7 +10,6 @@ import copy
 import sys
 
 import numpy as np
-import pyximport
 import torch
 import torch.nn.functional as F
 from pyquaternion import Quaternion
@@ -18,7 +17,6 @@ from pyquaternion import Quaternion
 import opencood.utils.common_utils as common_utils
 from opencood.utils.transformation_utils import x1_to_x2, x_to_world
 
-pyximport.install(language_level=3, setup_args={"include_dirs": np.get_include()})
 
 from opencood.utils.cython.box_utils import ProjectPointsByMatrixFloat32, ProjectPointsByMatrixFloat64
 
@@ -1303,7 +1301,7 @@ def _TestForProjectPointsByMatrix():
     """
     import time
 
-    N = 60000
+    N = 6
     points, transformation_matrix = np.random.rand(N, 3), np.random.rand(4, 4)
     print(points.dtype, transformation_matrix.dtype)
 
@@ -1324,6 +1322,12 @@ def _TestForProjectPointsByMatrix():
     projected_cython = ProjectPointsByMatrixUsingCython(points, transformation_matrix)
     end_numpy = time.time()
     print(f"Time taken by cython implementation: {end_numpy - start_numpy:.6f} seconds. Type: {projected_cython.dtype}")
+
+    print(projected_cython)
+    print()
+    print(projected_torch)
+    print()
+    print(projected_numpy)
 
 
 if __name__ == "__main__":

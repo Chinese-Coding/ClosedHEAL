@@ -1,36 +1,33 @@
 import numpy as np
-cimport numpy as cnp
 
-from opencood.utils.cython import transformation_utils
+from opencood.utils.cython.transformation_utils cimport X1ToX2
 
-ctypedef cnp.float32_t F32_t
-ctypedef cnp.float64_t F64_t
 
 def ProjectPointsByMatrixFloat32(
         cnp.ndarray[F32_t, ndim=2] points,
         cnp.ndarray[F32_t, ndim=2] transformation_matrix
 ):
-    cdef cnp.ndarray[F32_t, ndim=2] points_homogeneous, projected_points_homogeneous
+    cdef cnp.ndarray[F32_t, ndim=2] points_homogeneous, projected_points
 
     # convert to homogeneous coordinates via padding 1 at the last dimension
     points_homogeneous = np.pad(points, ((0, 0), (0, 1)), mode="constant", constant_values=1)
     # 使用 numpy 的高效矩阵乘法
-    projected_points_homogeneous = np.dot(points_homogeneous, transformation_matrix.T)
+    projected_points = np.dot(points_homogeneous, transformation_matrix.T)
 
-    return projected_points_homogeneous[:, :3]
+    return projected_points[:, :3]
 
 def ProjectPointsByMatrixFloat64(
         cnp.ndarray[F64_t, ndim=2] points,
         cnp.ndarray[F64_t, ndim=2] transformation_matrix
 ):
-    cdef cnp.ndarray[F64_t, ndim=2] points_homogeneous, projected_points_homogeneous
+    cdef cnp.ndarray[F64_t, ndim=2] points_homogeneous, projected_points
 
     # convert to homogeneous coordinates via padding 1 at the last dimension
     points_homogeneous = np.pad(points, ((0, 0), (0, 1)), mode="constant", constant_values=1)
     # 使用 numpy 的高效矩阵乘法
-    projected_points_homogeneous = np.dot(points_homogeneous, transformation_matrix.T)
+    projected_points = np.dot(points_homogeneous, transformation_matrix.T)
 
-    return projected_points_homogeneous[:, :3]
+    return projected_points[:, :3]
 
 cdef cnp.ndarray[F64_t, ndim=2] CreateBbx(list[double] extent):
     """
@@ -187,7 +184,7 @@ cdef cnp.ndarray[F64_t, ndim=3] MaskBoxesOutsideRangeWith7False(cnp.ndarray[F64_
     return  boxes[mask.sum(axis=1) >= mini_num_corners]
 
 
-def ProjectWorldObjects(dict[str, dict] object_dict, cnp.ndarray[F64_t, ndim=1] lidar_pose, cnp.ndarray[F64_t, ndim=1] lidar_range, str order, enlarge_z=False):
+cpdef dict ProjectWorldObjects(dict[str, dict] object_dict, cnp.ndarray[F64_t, ndim=1] lidar_pose, cnp.ndarray[F64_t, ndim=1] lidar_range, str order, enlarge_z=False):
     if enlarge_z:
         lidar_range = lidar_range[:]  # 浅拷贝一下
         lidar_range[2], lidar_range[5] = lidar_range[2] - 10, lidar_range[5] + 10
@@ -208,7 +205,7 @@ def ProjectWorldObjects(dict[str, dict] object_dict, cnp.ndarray[F64_t, ndim=1] 
             rotation[0], rotation[1], rotation[2],
         ])
 
-        object2lidar = transformation_utils.X1ToX2(object_pose, lidar_pose)  # 物体姿态转换到激光雷达坐标系
+        object2lidar = X1ToX2(object_pose, lidar_pose)  # 物体姿态转换到激光雷达坐标系
         bbx = np.vstack((CreateBbx(extent).T, np.ones((1, 8))))  # 创建物体的 bbx，shape (4, 8)，添加一行全 1 用于坐标变换
         bbx_lidar = np.dot(object2lidar, bbx).T[:, :3]  # 只保留前三列 (x, y, z) # 将 bounding box 投影到世界坐标系
         bbx_lidar = CornerToCenter(np.expand_dims(bbx_lidar, 0), order=order)  # 将角点转换为中心表示
@@ -218,7 +215,7 @@ def ProjectWorldObjects(dict[str, dict] object_dict, cnp.ndarray[F64_t, ndim=1] 
             output_dict[object_id] = bbx_lidar
     return output_dict
 
-cpdef cnp.ndarray[F64_t, ndim=2] Corner2dToStandupBox(cnp.ndarray[F64_t, ndim=3]box2d):
+cpdef cnp.ndarray[F64_t, ndim=2] Corner2dToStandupBox(cnp.ndarray[F64_t, ndim=3] box2d):
     """
     Find the minmaxx, minmaxy for each 2d box. (N, 4, 2) -> (N, 4)
     x1, y1, x2, y2

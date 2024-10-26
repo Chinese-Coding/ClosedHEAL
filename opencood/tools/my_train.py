@@ -6,6 +6,7 @@ import argparse
 import os
 import statistics
 import time
+import platform
 
 import torch
 from tensorboardX import SummaryWriter
@@ -18,6 +19,14 @@ from opencood.tools import train_utils
 from opencood.utils.logger import get_logger
 
 logger = get_logger()
+
+
+def _PrintSystemInfo():
+    print(f"""
+    操作系统以及版本: {platform.system()} {platform.version()}
+    计算机名称与用户名: {platform.node()} {os.getlogin()}
+    Python 与 pytorch 版本: {platform.python_version()} {torch.__version__}
+    """)
 
 
 def train_parser():
@@ -51,7 +60,7 @@ def _LoadModules(model_dir, hypes, model, optimizer):
     return saved_path, init_epoch, lowest_val_epoch, model, scheduler
 
 
-def _TrainOneEpoch(dataloader, device, epoch, writer, model, optimizer, criterion):
+def _TrainOneEpoch(dataloader, device, epoch, writer, model, optimizer, criterion, single_weight=1):
     length = len(dataloader)
     for i, batch_data in enumerate(dataloader):
         if batch_data is None or batch_data["ego"]["object_bbx_mask"].sum() == 0:
@@ -64,7 +73,10 @@ def _TrainOneEpoch(dataloader, device, epoch, writer, model, optimizer, criterio
 
         final_loss = criterion(output_dict, batch_data["ego"]["label_dict"])
         criterion.logging(epoch, i, length, writer)
-
+        # 这个东西是在 `supervise_signle_flag == true` 时才会用到, 因为配置文件里默认为 true, 所以就写在这里了
+        # 不知道 `supervise_signle_flag` 有什么用, 怀疑和 Loss 一直不下降有关系
+        final_loss += criterion(output_dict, batch_data["ego"]["label_dict_single"], suffix="_single") * single_weight
+        criterion.logging(epoch, i, length, writer, suffix="_single")
         final_loss.backward()
         optimizer.step()
 
@@ -102,6 +114,8 @@ def _SaveModel(lowest_val_loss, valid_ave_loss, lowest_val_epoch, epoch, saved_p
 
 
 def main():
+    _PrintSystemInfo()
+    os.system("python opencood/utils/setup.py build_ext --inplace")  # 每次执行前都先编译一下, 以免修改了忘记编译了
     opt = train_parser()
     hypes = yaml_utils.load_yaml(opt.hypes_yaml, opt)
 
@@ -114,7 +128,7 @@ def main():
     train_loader = DataLoader(
         trainDataset,
         batch_size=hypes["train_params"]["batch_size"],
-        num_workers=4,
+        num_workers=2,
         collate_fn=trainDataset.collate_batch_train,  # WARNING: 如果想要全部数据进行训练需要修改这里
         shuffle=True,
         pin_memory=True,  # 这里先改成 False, 先跑起来再说
@@ -124,7 +138,7 @@ def main():
     val_loader = DataLoader(
         evalDataset,
         batch_size=hypes["train_params"]["batch_size"],
-        num_workers=4,
+        num_workers=2,
         collate_fn=trainDataset.collate_batch_train,  # WARNING: 如果想要全部数据进行训练需要修改这里
         shuffle=True,
         pin_memory=True,  # 这里先改成 False, 先跑起来再说
@@ -134,12 +148,10 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # record lowest validation loss checkpoint.
-    lowest_val_loss, lowest_val_epoch = 1e5, -1
-
     logger.important("数据集加载完毕, 开始创建模型")
     model, criterion, optimizer, scheduler = _BuildModules(hypes)
     # if we want to train from last checkpoint.
+    lowest_val_loss, lowest_val_epoch = 1e5, -1
     saved_path, init_epoch, lowest_val_epoch, model, scheduler = _LoadModules(opt.model_dir, hypes, model, optimizer)
 
     model.to(device)
@@ -147,7 +159,7 @@ def main():
     # record training
     writer = SummaryWriter(saved_path)
 
-    epoches = hypes["train_params"]["epoches"]
+    epoches, single_weight = hypes["train_params"]["epoches"], hypes["train_params"].get("single_weight", 1)
 
     # used to help schedule learning rate
     usingTimeList = []
@@ -165,7 +177,7 @@ def main():
         except:
             print("No model_train_init function")
 
-        _TrainOneEpoch(train_loader, device, epoch, writer, model, optimizer, criterion)
+        _TrainOneEpoch(train_loader, device, epoch, writer, model, optimizer, criterion, single_weight)
 
         if epoch % hypes["train_params"]["save_freq"] == 0:
             torch.save(model.state_dict(), os.path.join(saved_path, "net_epoch%d.pth" % (epoch + 1)))
@@ -187,7 +199,7 @@ def main():
     run_test = True
     if run_test:
         fusion_method = opt.fusion_method
-        cmd = f"python opencood/tools/inference.py --model_dir {saved_path} --fusion_method {fusion_method}"
+        cmd = f"python opencood/tools/my_inference.py --model_dir {saved_path} --fusion_method {fusion_method}"
         print(f"Running command: {cmd}")
         os.system(cmd)
 

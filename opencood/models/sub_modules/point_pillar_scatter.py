@@ -41,13 +41,7 @@ class PointPillarScatter(nn.Module):
         """
         pillar_features, coords = batch_dict["pillar_features"], batch_dict["voxel_coords"]
         batch_spatial_features = []
-        try:
-            batch_size = coords[:, 0].max().int().item() + 1
-        except RuntimeError:
-            print(coords.shape)
-            print(coords[:, 0])
-            breakpoint()
-            raise Exception
+        batch_size = coords[:, 0].max().int().item() + 1
         for batch_idx in range(batch_size):
             spatial_feature = torch.zeros(
                 self.num_bev_features, self.nz * self.nx * self.ny, dtype=pillar_features.dtype, device=pillar_features.device

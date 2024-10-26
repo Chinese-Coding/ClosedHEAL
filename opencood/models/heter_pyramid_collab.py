@@ -177,14 +177,7 @@ class HeterPyramidCollab(nn.Module):
         heter_feature_2d_list = []
         for modality_name in agent_modality_list:
             feat_idx = counting_dict[modality_name]
-            try:
-                heter_feature_2d_list.append(modality_feature_dict[modality_name][feat_idx])
-            except IndexError:
-                print(modality_feature_dict[modality_name].shape)
-                print(feat_idx)
-                breakpoint()
-                raise Exception
-
+            heter_feature_2d_list.append(modality_feature_dict[modality_name][feat_idx])
             counting_dict[modality_name] += 1
         heter_feature_2d = torch.stack(heter_feature_2d_list)
         # 错误发生在 2365 (epoch1), 怀疑是数据处理的时候没有拼接正确, 该看看 data_dict 的, 又跑了一次没有遇到问题

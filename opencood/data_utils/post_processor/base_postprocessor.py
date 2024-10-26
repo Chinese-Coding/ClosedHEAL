@@ -17,9 +17,7 @@ from opencood.data_utils.data_models.dataset_models import CAVData
 from opencood.utils import box_utils
 from opencood.utils import common_utils
 from opencood.utils.transformation_utils import x1_to_x2
-import pyximport
 
-pyximport.install(language_level=3, setup_args={"include_dirs": np.get_include()})
 from opencood.utils.cython import box_utils as box_utils_cython
 
 
@@ -203,7 +201,7 @@ class BasePostprocessor(object):
         tmp_object_dict: Dict[int, np.ndarray] = dict(ChainMap(*(cav_content.params["vehicles"] for cav_content in cav_contents))) # fmt: skip
 
         output_dict: Dict[int, np.ndarray[np.float64]] = box_utils_cython.ProjectWorldObjects(
-            tmp_object_dict, np.array(reference_lidar_pose), self.filter_range_numpy, self.order, enlarge_z
+            tmp_object_dict, reference_lidar_pose, self.filter_range_numpy, self.order, enlarge_z
         )
         numObjs = min(len(output_dict), self.maxNum)
 
