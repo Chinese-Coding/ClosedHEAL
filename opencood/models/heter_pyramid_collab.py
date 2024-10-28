@@ -47,23 +47,14 @@ class HeterPyramidCollab(nn.Module):
                 if name.lower() == target_model_name.lower():
                     encoder_class = cls
 
-            """
-            Encoder building
-            """
+            """Encoder building"""
             setattr(self, f"encoder_{modality_name}", encoder_class(model_setting["encoder_args"]))
-            if model_setting["encoder_args"].get("depth_supervision", False):
-                setattr(self, f"depth_supervision_{modality_name}", True)
-            else:
-                setattr(self, f"depth_supervision_{modality_name}", False)
+            setattr(self, f"depth_supervision_{modality_name}", model_setting["encoder_args"].get("depth_supervision", False))
 
-            """
-            Backbone building 
-            """
+            """Backbone building"""
             setattr(self, f"backbone_{modality_name}", ResNetBEVBackbone(model_setting["backbone_args"]))
 
-            """
-            Aligner building
-            """
+            """Aligner building"""
             setattr(self, f"aligner_{modality_name}", AlignNet(model_setting["aligner_args"]))
             if sensor_name == "camera":
                 camera_mask_args = model_setting["camera_mask_args"]
@@ -99,9 +90,7 @@ class HeterPyramidCollab(nn.Module):
         """
         self.pyramid_backbone = PyramidFusion(args["fusion_backbone"])
 
-        """
-        Shrink header
-        """
+        """Shrink header"""
         self.shrink_flag = False
         if "shrink_header" in args:
             self.shrink_flag = True

@@ -2,24 +2,7 @@ import numpy as np
 
 from opencood.utils.cython.transformation_utils cimport X1ToX2
 
-
-def ProjectPointsByMatrixFloat32(
-        cnp.ndarray[F32_t, ndim=2] points,
-        cnp.ndarray[F32_t, ndim=2] transformation_matrix
-):
-    cdef cnp.ndarray[F32_t, ndim=2] points_homogeneous, projected_points
-
-    # convert to homogeneous coordinates via padding 1 at the last dimension
-    points_homogeneous = np.pad(points, ((0, 0), (0, 1)), mode="constant", constant_values=1)
-    # 使用 numpy 的高效矩阵乘法
-    projected_points = np.dot(points_homogeneous, transformation_matrix.T)
-
-    return projected_points[:, :3]
-
-def ProjectPointsByMatrixFloat64(
-        cnp.ndarray[F64_t, ndim=2] points,
-        cnp.ndarray[F64_t, ndim=2] transformation_matrix
-):
+def ProjectPointsByMatrix(cnp.ndarray[F64_t, ndim=2] points, cnp.ndarray[F64_t, ndim=2] transformation_matrix):
     cdef cnp.ndarray[F64_t, ndim=2] points_homogeneous, projected_points
 
     # convert to homogeneous coordinates via padding 1 at the last dimension
@@ -29,12 +12,11 @@ def ProjectPointsByMatrixFloat64(
 
     return projected_points[:, :3]
 
-cdef cnp.ndarray[F64_t, ndim=2] CreateBbx(list[double] extent):
+cdef inline cnp.ndarray[F64_t, ndim=2] CreateBbx(cnp.ndarray[F64_t, ndim=1] extent):
     """
     Create bounding box with 8 corners under obstacle vehicle reference.
     """
-
-    return np.array([
+    return np.asarray([
         [extent[0], -extent[1], -extent[2]],
         [extent[0], extent[1], -extent[2]],
         [-extent[0], extent[1], -extent[2]],
@@ -191,13 +173,11 @@ cpdef dict ProjectWorldObjects(dict[str, dict] object_dict, cnp.ndarray[F64_t, n
 
     output_dict = {}
     cdef cnp.ndarray[F64_t, ndim=2] object2lidar, bbx, bbx_lidar
-    cdef list[double] location, rotation, center, extent
-    cdef cnp.ndarray[F64_t, ndim=1] object_pose
+    cdef cnp.ndarray[F64_t, ndim=1] location, rotation, center, extent, object_pose
 
     for object_id, content in object_dict.items():
-
         location, rotation, center, extent = (
-            content["location"], content["angle"], content.get("center", [0, 0, 0]), content["extent"],
+            content["location"], content["angle"], content.get("center", np.zeros(3)), content["extent"],
         )
         # 计算物体的姿态
         object_pose = np.array([

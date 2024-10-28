@@ -10,18 +10,18 @@ Each agent should retrieve the objects itself, and merge them by iou,
 instead of using the cooperative label.
 """
 
-from typing import Dict
+from typing import Dict, Type
 
 import numpy as np
 import torch
 from opencood.utils.cython.pcd_utils import ProcessPoints
 from opencood.utils.cython.transformation_utils import GetPairwiseTransformation, X1ToX2
+from opencood.utils.cython.box_utils import ProjectPointsByMatrix
 from torch.utils.data import Dataset
 
 from opencood.data_utils.data_models.dataset_models import CAVData
 from opencood.data_utils.datasets.base_datasets.opv2v_dataset import OPV2VDataset
 from opencood.data_utils.pre_processor import build_preprocessor
-from opencood.utils import box_utils as box_utils
 from opencood.utils.camera_utils import (
     sample_augmentation,
     img_transform,
@@ -64,7 +64,7 @@ class InterHeteroFusionDataset(Dataset):
     删除一些看不懂的标志变量, 以及一些对于其他类型的数据集的处理
     """
 
-    def __init__(self, params, visualize, train, baseDataset: OPV2VDataset):
+    def __init__(self, params, visualize, train, baseDataset: Type[OPV2VDataset]):
         super().__init__()
         self.params = params
         self.visualize, self.train, self.hetero = visualize, train, True
@@ -102,15 +102,13 @@ class InterHeteroFusionDataset(Dataset):
     def __len__(self):
         return self.baseDataset.__len__()
 
-    def _ProcessLidarData(self, cavData: CAVData, sensor_type, modality_name, transformation_matrix: np.ndarray[np.float64]):
-        lidar_np = ProcessPoints(cavData.lidar_np)  # shape: (点云数量, 4)
+    def _ProcessLidarData(self, lidar_np: np.ndarray, sensor_type, modality_name, transformation_matrix: np.ndarray):
+        lidar_np = ProcessPoints(lidar_np)  # shape: (点云数量, 4)
         processedCAVData = {}
         if self.visualize:  # filter lidar
             # 对点云坐标进行投影 (不包括最后一维, 最后一维是反射强度) 为了使用 cython 这里与 `lidar_np` 的 dtype 保持一致
             # project the lidar to ego space x, y, z in ego space
-            processedCAVData["projected_lidar"] = box_utils.ProjectPointsByMatrixUsingCython(
-                lidar_np[:, :3], transformation_matrix.astype(np.float32)
-            )
+            processedCAVData["projected_lidar"] = ProjectPointsByMatrix(lidar_np[:, :3], transformation_matrix)
 
         if sensor_type == "lidar":
             processedCAVData[f"processed_features_{modality_name}"] = self.preprocessor[modality_name].preprocess(lidar_np)
@@ -199,7 +197,7 @@ class InterHeteroFusionDataset(Dataset):
         sensor_type = self.sensor_type_dict[modality_name]
 
         if sensor_type == "lidar" or self.visualize:
-            processedCAVData.update(self._ProcessLidarData(cavData, sensor_type, modality_name, transformation_matrix))
+            processedCAVData.update(self._ProcessLidarData(cavData.lidar_np, sensor_type, modality_name, transformation_matrix))
         if sensor_type == "camera":
             processedCAVData[f"image_inputs_{modality_name}"] = self._ProcessCameraData(cavData, modality_name)
 

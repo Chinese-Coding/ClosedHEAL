@@ -31,7 +31,7 @@ class SpVoxelPreprocessor(BasePreprocessor):
         # use sparse conv library to generate voxel TODO: 变量的命名上是否要做到和使用的 api 保持一致呢?
         self.voxel_generator = VoxelGenerator(self.voxel_size, self.lidar_range, 4, self.max_voxels, self.max_points_per_voxel)
 
-    def preprocess(self, pcd_np: np.ndarray[np.float32]):
+    def preprocess(self, pcd_np: np.ndarray):
         # 必须使用 `tv.from_numpy`, 因为 `point_to_voxel` 会对输入进行类型检查, tv 版本返回的和 torch 返回的不一样
         pcd_tv = tv.from_numpy(pcd_np)
         voxel_output = self.voxel_generator.point_to_voxel(pcd_tv)

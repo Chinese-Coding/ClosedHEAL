@@ -196,7 +196,7 @@ class BasePostprocessor(object):
 
         return gt_box3d_tensor
 
-    def GenerateObjectCenter(self, cav_contents: List[CAVData], reference_lidar_pose: np.ndarray[np.float64], enlarge_z=False):
+    def GenerateObjectCenter(self, cav_contents: List[CAVData], reference_lidar_pose: np.ndarray, enlarge_z=False):
         # 使用 ChainMap 合并多个字典，避免重复创建中间字典
         tmp_object_dict: Dict[int, np.ndarray] = dict(ChainMap(*(cav_content.params["vehicles"] for cav_content in cav_contents))) # fmt: skip
 

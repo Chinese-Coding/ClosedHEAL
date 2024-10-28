@@ -39,7 +39,7 @@ class CAVData(BaseModel):
     camera_data: SkipValidation[List[Image.Image]]
     depth_data: SkipValidation[List[Image.Image]]
 
-    lidar_np: Optional[np.ndarray[np.float32]] = None
+    lidar_np: Optional[np.ndarray[np.float64]] = None
     modality_name: Optional[str] = None
     file_extensions: Dict = Field(default_factory=dict)
 

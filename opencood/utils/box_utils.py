@@ -18,9 +18,6 @@ import opencood.utils.common_utils as common_utils
 from opencood.utils.transformation_utils import x1_to_x2, x_to_world
 
 
-from opencood.utils.cython.box_utils import ProjectPointsByMatrixFloat32, ProjectPointsByMatrixFloat64
-
-
 def corner_to_center_torch(corner3d, order="lwh"):
     corner3d_ = corner3d.cpu().numpy()
     return torch.from_numpy(corner_to_center(corner3d_, order)).to(corner3d.device)
@@ -831,15 +828,6 @@ def remove_bbx_abnormal_z(bbx_3d):
     index = torch.logical_and(bbx_z_min >= -3, bbx_z_max <= 1)
 
     return index
-
-
-def ProjectPointsByMatrixUsingCython(points: np.ndarray, transformation_matrix: np.ndarray) -> np.ndarray:
-    if points.dtype == np.float32 and transformation_matrix.dtype == np.float32:
-        return ProjectPointsByMatrixFloat32(points, transformation_matrix)
-    elif points.dtype == np.float64 and transformation_matrix.dtype == np.float64:
-        return ProjectPointsByMatrixFloat64(points, transformation_matrix)
-    else:
-        raise TypeError(f"points 和 transformation_matrix 的数据类型不匹配. {points.dtype=}, {transformation_matrix.dtype=}")
 
 
 def ProjectPointsByMatrixUsingTorch(points: np.ndarray, transformation_matrix: np.ndarray) -> np.ndarray:

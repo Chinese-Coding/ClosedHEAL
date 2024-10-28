@@ -9,17 +9,11 @@ Utility functions related to point cloud
 
 import numpy as np
 import open3d as o3d
-from pypcd import pypcd
 
 
-def pcd_to_np(pcd_file):
+def pcd_to_np(pcd_file: str):
     """
     Read  pcd and return numpy array.
-
-    Parameters
-    ----------
-    pcd_file : str
-        The pcd file that contains the point cloud.
 
     Returns
     -------
@@ -36,7 +30,7 @@ def pcd_to_np(pcd_file):
     intensity = np.expand_dims(np.asarray(pcd.colors)[:, 0], -1)
     pcd_np = np.hstack((xyz, intensity))
 
-    return np.asarray(pcd_np, dtype=np.float32)
+    return np.asarray(pcd_np, dtype=np.float64)  # 这里改成 np.float64 为了方便后续计算的统一
 
 
 def mask_points_by_range(points, limit_range):
@@ -201,16 +195,3 @@ def downsample_lidar_minimum(pcd_np_list):
         pcd_np_list[i] = downsample_lidar(pcd_np, minimum)
 
     return pcd_np_list
-
-
-def read_pcd(pcd_path):
-    pcd = pypcd.PointCloud.from_path(pcd_path)
-    time = None
-    pcd_np_points = np.zeros((pcd.points, 4), dtype=np.float32)
-    pcd_np_points[:, 0] = np.transpose(pcd.pc_data["x"])
-    pcd_np_points[:, 1] = np.transpose(pcd.pc_data["y"])
-    pcd_np_points[:, 2] = np.transpose(pcd.pc_data["z"])
-    pcd_np_points[:, 3] = np.transpose(pcd.pc_data["intensity"]) / 256.0
-    del_index = np.where(np.isnan(pcd_np_points))[0]
-    pcd_np_points = np.delete(pcd_np_points, del_index, axis=0)
-    return pcd_np_points, time

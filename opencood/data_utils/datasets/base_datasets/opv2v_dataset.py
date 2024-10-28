@@ -32,21 +32,30 @@ def _GetTimestampDataPath(cavPath: Path, timestamp: str):
     :param cavPath 汽车所在路径
     :param timestamp 时间戳
     """
-    yaml_file = os.path.join(cavPath, timestamp + ".yaml")
-    lidar_file = os.path.join(cavPath, timestamp + ".pcd")
+    yaml_file, lidar_file = os.path.join(cavPath, f"{timestamp}.yaml"), os.path.join(cavPath, f"{timestamp}.pcd")
     camera_files, depth_files = [cavPath / f"{timestamp}_camera{i}.png" for i in range(4)], [cavPath / f"{timestamp}_depth{i}.png" for i in range(4)] # fmt: skip
-    depth_files = [Path(str(depth_file).replace("OPV2V", "OPV2V_Hetero")) for depth_file in depth_files]
+    # 替换 "OPV2V" 为 "OPV2V_Hetero" 在 depth 文件路径中
+    depth_files = [p.with_name(p.name.replace("OPV2V", "OPV2V_Hetero")) for p in depth_files]
+
     return yaml_file, lidar_file, camera_files, depth_files
 
 
-def _LoadParams(yamlFile):
+def _LoadParams(yamlFile: str):
     """
-    Load params from YAML (同时将列表数据转换为 np.ndarray)
+    Load params from YAML (同时将嵌套字典中的列表数据递归转换为 np.ndarray)
     """
     params = load_yaml(yamlFile)
-    # 使用 numpy.array 自动处理嵌套列表
-    params = {k: np.array(v) if isinstance(v, list) else v for k, v in params.items()}
-    return params
+
+    def _ConvertToArray(data):
+        match data:
+            case dict():
+                return {k: _ConvertToArray(v) for k, v in data.items()}
+            case list():
+                return np.array(data)
+            case _:
+                return data
+
+    return _ConvertToArray(params)  # 对 params 进行递归处理
 
 
 def _ReplaceWithAdditional(filePath: str):
@@ -230,9 +239,9 @@ class OPV2VDataset(Dataset):
         for cav_id, cav_content in scenario_database.items():
             cavData = CAVData(
                 ego=cav_content["ego"],
-                params=_LoadParams(cav_content[timestamp_key]["yaml"]),
-                camera_data=load_camera_data(cav_content[timestamp_key]["cameras"]) if self.load_camera_file else [],
-                depth_data=load_camera_data(cav_content[timestamp_key]["depths"]) if self.load_depth_file else [],
+                params=_LoadParams(cav_content[timestamp_key].yaml),
+                camera_data=load_camera_data(cav_content[timestamp_key].cameras) if self.load_camera_file else [],
+                depth_data=load_camera_data(cav_content[timestamp_key].depths) if self.load_depth_file else [],
             )
 
             # load lidar file
@@ -283,7 +292,7 @@ class OPV2VDataset(Dataset):
 
         return lidar_np, object_bbx_center, object_bbx_mask
 
-    def GenerateObjectCenterLidar(self, cav_contents: List[CAVData], reference_lidar_pose: List[float]):
+    def GenerateObjectCenterLidar(self, cav_contents: List[CAVData], reference_lidar_pose: np.ndarray):
         return self.post_processor.GenerateObjectCenter(cav_contents, reference_lidar_pose)
 
     def generate_object_center_lidar(self, cav_contents, reference_lidar_pose):
