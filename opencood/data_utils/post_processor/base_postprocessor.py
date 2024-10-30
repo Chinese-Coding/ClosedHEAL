@@ -16,9 +16,10 @@ import torch
 from opencood.data_utils.data_models.dataset_models import CAVData
 from opencood.utils import box_utils
 from opencood.utils import common_utils
+from opencood.utils.cython import box_utils as box_utils_cython
 from opencood.utils.transformation_utils import x1_to_x2
 
-from opencood.utils.cython import box_utils as box_utils_cython
+AF64 = np.ndarray[np.float64]
 
 
 class BasePostprocessor(object):
@@ -47,6 +48,7 @@ class BasePostprocessor(object):
         self.order, self.maxNum = anchor_params["order"], anchor_params["max_num"]
         self.filter_range = self.params["anchor_args"]["cav_lidar_range"] if self.train else self.params["gt_range"]
         self.filter_range_numpy = np.array(self.filter_range)
+        self.inf_filter_range_numpy = np.array([-1e5, -1e5, -1e5, 1e5, 1e5, 1e5])
 
     @abstractmethod
     def generate_anchor_box(self):
@@ -196,20 +198,25 @@ class BasePostprocessor(object):
 
         return gt_box3d_tensor
 
-    def GenerateObjectCenter(self, cav_contents: List[CAVData], reference_lidar_pose: np.ndarray, enlarge_z=False):
-        # 使用 ChainMap 合并多个字典，避免重复创建中间字典
-        tmp_object_dict: Dict[int, np.ndarray] = dict(ChainMap(*(cav_content.params["vehicles"] for cav_content in cav_contents))) # fmt: skip
-
-        output_dict: Dict[int, np.ndarray[np.float64]] = box_utils_cython.ProjectWorldObjects(
-            tmp_object_dict, reference_lidar_pose, self.filter_range_numpy, self.order, enlarge_z
+    def _BasicGenerateObjectCenter(self, objects: Dict[int, AF64], refLidarPose: AF64, enlarge_z=False):
+        """
+        从 `GenerateObjectCenter` 和 `GenerateVisibleObjectCenter` 提取到的公共部分
+        """
+        outputDict: Dict[int, AF64] = box_utils_cython.ProjectWorldObjects(
+            objects, refLidarPose, self.filter_range_numpy, self.order, enlarge_z
         )
-        numObjs = min(len(output_dict), self.maxNum)
+        numObjs = min(len(outputDict), self.maxNum)
 
-        object_np, mask, object_ids = np.zeros((self.maxNum, 7)), np.zeros(self.maxNum), list(output_dict.keys())[:numObjs]
+        object_np, mask, object_ids = np.zeros((self.maxNum, 7)), np.zeros(self.maxNum), list(outputDict.keys())[:numObjs]
         if numObjs != 0:  # 需要对 `0` 这种情况做一个特殊处理
-            object_np[:numObjs], mask[:numObjs] = np.array([output_dict[objId][0, :] for objId in object_ids]), np.ones(numObjs)
+            object_np[:numObjs], mask[:numObjs] = np.array([outputDict[objId][0, :] for objId in object_ids]), np.ones(numObjs)
 
         return object_np, mask.astype(np.int64), object_ids
+
+    def GenerateObjectCenter(self, cav_contents: List[CAVData], reference_lidar_pose: AF64, enlarge_z=False):
+        # 使用 ChainMap 合并多个字典，避免重复创建中间字典
+        tmp_object_dict: Dict[int, AF64] = dict(ChainMap(*(cav_content.params["vehicles"] for cav_content in cav_contents))) # fmt: skip
+        return self._BasicGenerateObjectCenter(tmp_object_dict, reference_lidar_pose, enlarge_z)
 
     def generate_object_center(self, cav_contents, reference_lidar_pose, enlarge_z=False):
         """
@@ -406,12 +413,7 @@ class BasePostprocessor(object):
 
         return object_np, mask, object_ids
 
-    def generate_object_center_dairv2x_single_hetero(
-        self,
-        cav_contents,
-        reference_lidar_pose,
-        suffix,
-    ):
+    def generate_object_center_dairv2x_single_hetero(self, cav_contents, reference_lidar_pose, suffix):
         """
         Retrieve all objects in a format of (n, 7), where 7 represents
         x, y, z, l, w, h, yaw or x, y, z, h, w, l, yaw.
@@ -457,6 +459,17 @@ class BasePostprocessor(object):
             object_ids.append(object_id)
 
         return object_np, mask, object_ids
+
+    def GenerateVisibleObjectCenter(self, cav_contents: List[CAVData], refLidarPose: AF64, enlarge_z=False):
+        assert len(cav_contents) == 1
+        tmp_object_dict: Dict[int, np.ndarray] = dict(ChainMap(*(cav_content.params["vehicles"] for cav_content in cav_contents))) # fmt: skip
+        visibility_map = np.asarray(cv2.cvtColor(cav_contents[0].file_extensions["bev_visibility.png"], cv2.COLOR_BGR2GRAY))
+        ego_lidar_pose = cav_contents[0].params["lidar_pose_clean"]
+        output_dict = box_utils_cython.ProjectWorldVisibleObjects(
+            tmp_object_dict, ego_lidar_pose, self.inf_filter_range_numpy, self.order, visibility_map, enlarge_z
+        )
+        updated_tmp_object_dict = {k: v for k, v in tmp_object_dict.items() if k in output_dict}
+        return self._BasicGenerateObjectCenter(updated_tmp_object_dict, refLidarPose, enlarge_z)
 
     def generate_visible_object_center(self, cav_contents, reference_lidar_pose, enlarge_z=False):
         """

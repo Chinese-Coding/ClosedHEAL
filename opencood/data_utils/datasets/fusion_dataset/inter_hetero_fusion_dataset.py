@@ -10,7 +10,7 @@ Each agent should retrieve the objects itself, and merge them by iou,
 instead of using the cooperative label.
 """
 
-from typing import Dict, Type
+from typing import Dict, Type, Tuple, Union, Any
 
 import numpy as np
 import torch
@@ -59,6 +59,38 @@ def _GetUniqueObjects(object_id_stack, object_stack):
     return [object_id_stack[i] for i in unique_indices], object_stack
 
 
+def _GetExtInt(params, camera_id) -> Tuple[np.ndarray[np.float64], np.ndarray[np.float64]]:
+    """该函数可能会被其他类调用, 所以不可能为静态的"""
+    camera_coords, camera_intrinsic = params[f"camera{camera_id}"]["cords"], params[f"camera{camera_id}"]["intrinsic"]
+    camera_to_lidar = X1ToX2(camera_coords, params["lidar_pose_clean"])  # T_LiDAR_camera
+    # UE4 coord to opencv coord
+    camera_to_lidar = camera_to_lidar @ np.array([[0, 0, 1, 0], [1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 0, 1]])
+    return camera_to_lidar, camera_intrinsic
+
+
+def _ConvertToTensors(data: Any, dtype: torch.dtype = torch.float32, device: Union[str, torch.device] = "cpu") -> Any:
+    """
+    递归地遍历数据结构，将所有的 torch.Tensor 转换为指定的 dtype 和 device。
+
+    :param data: 输入的数据，可以是字典、列表、元组、集合、张量或其他类型。
+    :param dtype: 目标数据类型。默认是 torch.float32。
+    :param device: 目标设备。默认是 'cpu'。
+    :return 转换后的数据结构，所有张量都被转换为指定的 dtype 和 device。
+    """
+    if isinstance(data, torch.Tensor):
+        return data.to(dtype=dtype, device=device)
+    elif isinstance(data, dict):
+        return {k: _ConvertToTensors(v, dtype, device) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [_ConvertToTensors(item, dtype, device) for item in data]
+    elif isinstance(data, tuple):
+        return tuple(_ConvertToTensors(item, dtype, device) for item in data)
+    elif isinstance(data, set):
+        return {_ConvertToTensors(item, dtype, device) for item in data}
+    else:
+        return data
+
+
 class InterHeteroFusionDataset(Dataset):
     """
     删除一些看不懂的标志变量, 以及一些对于其他类型的数据集的处理
@@ -93,7 +125,7 @@ class InterHeteroFusionDataset(Dataset):
                 case "lidar":
                     self.preprocessor[modality_name] = build_preprocessor(modal_setting["preprocess"], train)
                 case "camera":
-                    self.dataAugConf = modal_setting["data_aug_conf"]
+                    self.dataAugConf[modality_name] = modal_setting["data_aug_conf"]
                 case _:
                     raise TypeError("Not support this type of sensor")
 
@@ -119,7 +151,7 @@ class InterHeteroFusionDataset(Dataset):
         imgs, rots, trans, intrins, extrinsics, post_rots, post_trans = [], [], [], [], [], [], []
 
         for idx, img in enumerate(camera_data_list):
-            camera_to_lidar, camera_intrinsic = self.get_ext_int(params, idx)
+            camera_to_lidar, camera_intrinsic = _GetExtInt(params, idx)
             intrin = torch.from_numpy(camera_intrinsic)
 
             # R_wc, we consider world-coord is the lidar-coord; t_wc
@@ -128,37 +160,32 @@ class InterHeteroFusionDataset(Dataset):
             img_src = [img]
 
             # depth
-            if self.load_depth_file:
-                depth_img = selected_cav_base["depth_data"][idx]
-                img_src.append(depth_img)
+            if self.baseDataset.load_depth_file:
+                img_src.append(selected_cav_base["depth_data"][idx])
 
             # data augmentation
-            resize, resize_dims, crop, flip, rotate = sample_augmentation(
-                eval(f"self.data_aug_conf_{modality_name}"), self.train
-            )
-            img_src, post_rot2, post_tran2 = img_transform(
-                img_src, post_rot, post_tran, resize, resize_dims, crop, flip, rotate
-            )
+            resize, resize_dims, crop, flip, rotate = sample_augmentation(self.dataAugConf[modality_name], self.train)
+            img_src, post_rot2, post_tran2 = img_transform(img_src, post_rot, post_tran, resize, resize_dims, crop, flip, rotate) # fmt: skip
+
             # for convenience, make augmentation matrices 3x3
-            post_tran = torch.zeros(3)
-            post_rot = torch.eye(3)
-            post_tran[:2] = post_tran2
-            post_rot[:2, :2] = post_rot2
+            post_tran, post_rot = torch.zeros(3), torch.eye(3)
+            post_tran[:2], post_rot[:2, :2] = post_tran2, post_rot2
 
             # decouple RGB and Depth
 
             img_src[0] = normalize_img(img_src[0])
-            if self.load_depth_file:
+            if self.baseDataset.load_depth_file:
                 img_src[1] = img_to_tensor(img_src[1]) * 255
 
-            imgs.append(img_src)
+            imgs.append(torch.cat(img_src, dim=0))
             intrins.append(intrin)
+            extrinsics.append(torch.from_numpy(camera_to_lidar))
             rots.append(rot)
             trans.append(tran)
             post_rots.append(post_rot)
             post_trans.append(post_tran)
-
-        return {
+        # 因为其中的一些值可能为 64 位, 所以需要转换成 32 位进行计算
+        return _ConvertToTensors({
             "imgs": torch.stack(imgs),
             "intrins": torch.stack(intrins),
             "extrinsics": torch.stack(extrinsics),
@@ -166,7 +193,7 @@ class InterHeteroFusionDataset(Dataset):
             "trans": torch.stack(trans),
             "post_rots": torch.stack(post_rots),
             "post_trans": torch.stack(post_trans),
-        }
+        })
 
     def get_item_single_car(self, cavData: CAVData, ego_pose: np.ndarray[np.float64], ego_pose_clean: np.ndarray[np.float64]):
         """
@@ -262,18 +289,23 @@ class InterHeteroFusionDataset(Dataset):
 
             if sensor_type not in {"lidar", "camera"}:
                 raise TypeError(f"Not support this type of this sensor: {sensor_type}")
-
+            # TODO: 这里对 `sensor_type` 做了多次判断, 以后看看能不能对这里做一个简化
             if self.visualize:
                 self.generate_object_center = self.baseDataset.GenerateObjectCenter
             elif sensor_type == "lidar":  # TODO: 这里先只是讨论 lidar 的情况
                 self.generate_object_center = self.baseDataset.GenerateObjectCenterLidar
+            elif sensor_type == "camera":
+                self.generate_object_center = self.baseDataset.GenerateObjectCenterCamera
             else:
-                self.generate_object_center = eval(f"self.generate_object_center_{sensor_type}")
+                self.generate_object_center = eval(f"self.baseDataset.generate_object_center_{sensor_type}")
 
             selected_cav_processed = self.get_item_single_car(legalCAVData, ego_pose, ego_pose_clean)
 
-            inputListModalities[modality_name].append(selected_cav_processed[f"processed_features_{modality_name}"])
-
+            match sensor_type:
+                case "lidar":
+                    inputListModalities[modality_name].append(selected_cav_processed[f"processed_features_{modality_name}"])
+                case "camera":
+                    inputListModalities[modality_name].append(selected_cav_processed[f"image_inputs_{modality_name}"])
             # 整合多车数据
             agent_modality_list.append(modality_name)
             object_stack.append(selected_cav_processed["object_bbx_center"])
@@ -305,7 +337,7 @@ class InterHeteroFusionDataset(Dataset):
                 merged_feature_dict = merge_features_to_dict(inputListModalities[modality_name])
                 processed_data_dict["ego"].update({f"input_{modality_name}": merged_feature_dict})  # maybe None
             elif self.sensor_type_dict[modality_name] == "camera":
-                merged_image_inputs_dict = merge_features_to_dict(eval(f"input_list_{modality_name}"), merge="stack")
+                merged_image_inputs_dict = merge_features_to_dict(inputListModalities[modality_name], merge="stack")
                 processed_data_dict["ego"].update({f"input_{modality_name}": merged_image_inputs_dict})  # maybe None
 
         # generate targets label
@@ -383,41 +415,30 @@ class InterHeteroFusionDataset(Dataset):
                 if ego_dict[f"input_{modality_name}"] is not None:
                     inputsListModalities[modality_name].append(ego_dict[f"input_{modality_name}"])  # {} if empty?
 
-        # convert to numpy, (B, max_num, 7)
-        object_bbx_center, object_bbx_mask = torch.from_numpy(np.array(object_bbx_center)), torch.from_numpy(np.array(object_bbx_mask)) # fmt: skip
-        pairwise_t_matrix = torch.from_numpy(np.array(pairwise_t_matrix_list))  # (B, max_cav)
-        record_len = torch.from_numpy(np.array(record_len, dtype=int))
-        lidar_pose = torch.from_numpy(np.concatenate(lidar_pose_list, axis=0))
-        lidar_pose_clean = torch.from_numpy(np.concatenate(lidar_pose_clean_list, axis=0))
-        label_torch_dict = self.baseDataset.post_processor.collate_batch(label_dict_list)
-
         for modality_name in self.modality_name_list:
-            if len(inputsListModalities[modality_name]) != 0:
-                if self.sensor_type_dict[modality_name] == "lidar":
+            if len(inputsListModalities[modality_name]) == 0:
+                continue  # 判断条件反写, 减少缩进
+            match self.sensor_type_dict[modality_name]:
+                case "lidar":
                     merged_feature_dict = merge_features_to_dict(inputsListModalities[modality_name])
                     processed_lidar_torch_dict = self.preprocessor[modality_name].collate_batch(merged_feature_dict)
-                    if processed_lidar_torch_dict["voxel_coords"].shape[0] == 0:
-                        print(1)
-                        print(processed_lidar_torch_dict)
-                        breakpoint()
-                        raise Exception
                     output_dict["ego"].update({f"inputs_{modality_name}": processed_lidar_torch_dict})
-                elif self.sensor_type_dict[modality_name] == "camera":
-                    merged_image_inputs_dict = merge_features_to_dict(eval(f"inputs_list_{modality_name}"), merge="cat")
+                case "camera":
+                    merged_image_inputs_dict = merge_features_to_dict(inputsListModalities[modality_name], merge="cat")
                     output_dict["ego"].update({f"inputs_{modality_name}": merged_image_inputs_dict})
 
         # object id is only used during inference, where batch size is 1.
         # so here we only get the first element.
         output_dict["ego"].update({
             "agent_modality_list": agent_modality_list,
-            "object_bbx_center": object_bbx_center,
-            "object_bbx_mask": object_bbx_mask,
-            "record_len": record_len,
-            "label_dict": label_torch_dict,
+            "object_bbx_center": torch.from_numpy(np.array(object_bbx_center)),  # (B, max_num, 7)
+            "object_bbx_mask": torch.from_numpy(np.array(object_bbx_mask)),  # (B, max_num, 7)
+            "record_len": torch.from_numpy(np.array(record_len, dtype=int)),
+            "label_dict": self.baseDataset.post_processor.collate_batch(label_dict_list),
             "object_ids": object_ids[0],
-            "pairwise_t_matrix": pairwise_t_matrix,
-            "lidar_pose_clean": lidar_pose_clean,
-            "lidar_pose": lidar_pose,
+            "pairwise_t_matrix": torch.from_numpy(np.array(pairwise_t_matrix_list)),  # (B, max_cav)
+            "lidar_pose_clean": torch.from_numpy(np.concatenate(lidar_pose_clean_list, axis=0)),
+            "lidar_pose": torch.from_numpy(np.concatenate(lidar_pose_list, axis=0)),
             "anchor_box": self.anchor_box_torch,
             # 单车数据
             "label_dict_single": {

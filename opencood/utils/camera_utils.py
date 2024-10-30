@@ -3,11 +3,27 @@
 # License: TDG-Attribution-NonCommercial-NoDistrib
 
 import math
+from pathlib import Path
+from typing import List
 
 import numpy as np
 import torch
 import torchvision
 from PIL import Image
+
+
+def LoadCameraData(camera_files: List[Path], preLoad=True):
+    """
+    在 Python 的 PIL 库中，Image.open() 函数并不会立刻把整个图像数据加载到内存中，而是采用“延迟加载”的方式，
+    即仅在需要时（例如第一次访问像素数据时）才会实际加载。这种懒加载方式可以节省内存，但在并发访问时可能会导致数据被释放或修改。
+
+    通过 preload=True，代码会在读取图像后立即调用 .copy()，从而将图像数据实际加载到内存中，提高运行速度
+    """
+    return (
+        [Image.open(camera_file).copy() for camera_file in camera_files]
+        if preLoad
+        else [Image.open(camera_file) for camera_file in camera_files]
+    )
 
 
 def load_camera_data(camera_files, preload=True):
@@ -90,12 +106,10 @@ def img_transform(imgs, post_rot, post_tran, resize, resize_dims, crop, flip, ro
 
 
 def get_rot(h):
-    return torch.Tensor(
-        [
-            [np.cos(h), np.sin(h)],
-            [-np.sin(h), np.cos(h)],
-        ]
-    )
+    return torch.Tensor([
+        [np.cos(h), np.sin(h)],
+        [-np.sin(h), np.cos(h)],
+    ])
 
 
 class NormalizeInverse(torchvision.transforms.Normalize):
@@ -111,20 +125,16 @@ class NormalizeInverse(torchvision.transforms.Normalize):
         return super().__call__(tensor.clone())
 
 
-denormalize_img = torchvision.transforms.Compose(
-    (
-        NormalizeInverse(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        torchvision.transforms.ToPILImage(),
-    )
-)
+denormalize_img = torchvision.transforms.Compose((
+    NormalizeInverse(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    torchvision.transforms.ToPILImage(),
+))
 
 
-normalize_img = torchvision.transforms.Compose(
-    (
-        torchvision.transforms.ToTensor(),
-        torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    )
-)
+normalize_img = torchvision.transforms.Compose((
+    torchvision.transforms.ToTensor(),
+    torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+))
 
 img_to_tensor = torchvision.transforms.ToTensor()  # [0,255] -> [0,1]
 

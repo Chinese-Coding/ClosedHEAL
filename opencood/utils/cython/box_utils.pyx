@@ -166,14 +166,16 @@ cdef cnp.ndarray[F64_t, ndim=3] MaskBoxesOutsideRangeWith7False(cnp.ndarray[F64_
     return  boxes[mask.sum(axis=1) >= mini_num_corners]
 
 
-cpdef dict ProjectWorldObjects(dict[str, dict] object_dict, cnp.ndarray[F64_t, ndim=1] lidar_pose, cnp.ndarray[F64_t, ndim=1] lidar_range, str order, enlarge_z=False):
+cpdef dict[str, cnp.ndarray[F64_t]] ProjectWorldObjects(dict[int, dict[str, cnp.ndarray[F64_t]]] object_dict, cnp.ndarray[F64_t, ndim=1] lidar_pose, cnp.ndarray[F64_t, ndim=1] lidar_range, str order, enlarge_z=False):
     if enlarge_z:
         lidar_range = lidar_range[:]  # 浅拷贝一下
         lidar_range[2], lidar_range[5] = lidar_range[2] - 10, lidar_range[5] + 10
 
-    output_dict = {}
+    cdef dict[int, cnp.ndarray[F64_t]] output_dict = {}
     cdef cnp.ndarray[F64_t, ndim=2] object2lidar, bbx, bbx_lidar
     cdef cnp.ndarray[F64_t, ndim=1] location, rotation, center, extent, object_pose
+    cdef int object_id
+    cdef dict[str, cnp.ndarray[F64_t]] content
 
     for object_id, content in object_dict.items():
         location, rotation, center, extent = (
@@ -194,6 +196,66 @@ cpdef dict ProjectWorldObjects(dict[str, dict] object_dict, cnp.ndarray[F64_t, n
         if bbx_lidar.shape[0] > 0:  # 如果过滤后仍有 box，更新到输出字典
             output_dict[object_id] = bbx_lidar
     return output_dict
+
+cdef bint _BoxIsVisible(cnp.ndarray[F64_t, ndim=2] bbx_lidar, cnp.ndarray[cnp.uint8_t, ndim=2] visibility_map):
+    """
+    fitler bbx_lidar by visibility map.
+
+    (0,0)------------px
+    |        ^ x      |
+    |        |        |
+    |        o---> y  |
+    |                 |
+    |                 |
+    py-----------------(256,256)
+
+    :param bbx_lidar: shape: (1, 7), x, y, z, dx, dy, dz, yaw. dx,dy,dz follows order.
+    :oaram visibility_map: shape: (256, 256). Non zero is visible.
+    """
+    cdef int x, y, py, px
+    x, y = bbx_lidar[0, :2]
+    # rasterize x and y
+    py, px = 127 - int(x / 0.39), 127 + int(y / 0.39)
+
+    if py < 0 or py >= 256 or px < 0 or px >= 256:
+        return False
+
+    return visibility_map[py, px] > 0
+
+def ProjectWorldVisibleObjects(
+        dict[int, dict[str, cnp.ndarray[F64_t]]] object_dict,
+        cnp.ndarray[F64_t, ndim=1] lidar_pose, cnp.ndarray[F64_t, ndim=1] lidar_range,
+        str order, cnp.ndarray[cnp.uint8_t, ndim=2] visibility_map, enlarge_z=False):
+    if enlarge_z:
+        lidar_range = lidar_range[:]  # 浅拷贝一下
+        lidar_range[2], lidar_range[5] = lidar_range[2] - 10, lidar_range[5] + 10
+
+    cdef dict[int, cnp.ndarray[F64_t]] output_dict = {}
+    cdef cnp.ndarray[F64_t, ndim=2] object2lidar, bbx, bbx_lidar
+    cdef cnp.ndarray[F64_t, ndim=1] location, rotation, center, extent, object_pose
+    cdef int object_id
+    cdef dict[str, cnp.ndarray[F64_t]] content
+
+    for object_id, content in object_dict.items():
+        location, rotation, center, extent = (
+            content["location"], content["angle"], content.get("center", np.zeros(3)), content["extent"],
+        )
+        # 计算物体的姿态
+        object_pose = np.array([
+            location[0] + center[0], location[1] + center[1], location[2] + center[2],
+            rotation[0], rotation[1], rotation[2],
+            ])
+
+        object2lidar = X1ToX2(object_pose, lidar_pose)  # 物体姿态转换到激光雷达坐标系
+        bbx = np.vstack((CreateBbx(extent).T, np.ones((1, 8))))  # 创建物体的 bbx，shape (4, 8)，添加一行全 1 用于坐标变换
+        bbx_lidar = np.dot(object2lidar, bbx).T[:, :3]  # 只保留前三列 (x, y, z) # 将 bounding box 投影到世界坐标系
+        bbx_lidar = CornerToCenter(np.expand_dims(bbx_lidar, 0), order=order)  # 将角点转换为中心表示
+        bbx_lidar = MaskBoxesOutsideRangeWith7False(bbx_lidar, lidar_range, order)  # 根据范围过滤
+
+        if bbx_lidar.shape[0] > 0 and _BoxIsVisible(bbx_lidar, visibility_map):  # 如果过滤后仍有 box，更新到输出字典
+            output_dict[object_id] = bbx_lidar
+    return output_dict
+
 
 cpdef cnp.ndarray[F64_t, ndim=2] Corner2dToStandupBox(cnp.ndarray[F64_t, ndim=3] box2d):
     """
@@ -219,5 +281,3 @@ cpdef cnp.ndarray[F64_t, ndim=2] Corner2dToStandupBox(cnp.ndarray[F64_t, ndim=3]
     standup_boxes2d[:, 3] = np.max(box2d[:, :, 1], axis=1)
 
     return standup_boxes2d
-
-

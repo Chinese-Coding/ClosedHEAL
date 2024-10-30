@@ -10,6 +10,40 @@ import re
 import numpy as np
 import yaml
 
+loader = yaml.Loader
+loader.add_implicit_resolver(
+    "tag:yaml.org,2002:float",
+    re.compile(
+        """^(?:
+     [-+]?(?:[0-9][0-9_]*)\\.[0-9_]*(?:[eE][-+]?[0-9]+)?
+    |[-+]?(?:[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)
+    |\\.[0-9_]+(?:[eE][-+][0-9]+)?
+    |[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\\.[0-9_]*
+    |[-+]?\\.(?:inf|Inf|INF)
+    |\\.(?:nan|NaN|NAN))$""",
+        re.X,
+    ),
+    list("-+0123456789."),
+)
+
+
+def LoadYAML(file, opt=None):
+    if opt and opt.model_dir:
+        file = os.path.join(opt.model_dir, "config.yaml")
+    with open(file, "r") as f:
+        param = yaml.load(f, Loader=loader)
+    if "yaml_parser" in param:
+        param = eval(param["yaml_parser"])(param)
+    return param
+
+
+def _LoadGeneralParams(param):
+    basicDir = os.path.expanduser(param["basic_dir"])
+    param["root_dir"] = os.path.join(basicDir, param["root_dir"])
+    param["validate_dir"] = os.path.join(basicDir, param["validate_dir"])
+    param["test_dir"] = os.path.join(basicDir, param["test_dir"])
+    return load_general_params(param)
+
 
 def load_yaml(file, opt=None):
     """

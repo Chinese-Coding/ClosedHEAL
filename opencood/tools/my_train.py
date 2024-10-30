@@ -117,7 +117,7 @@ def main():
     _PrintSystemInfo()
     os.system("python opencood/utils/setup.py build_ext --inplace")  # 每次执行前都先编译一下, 以免修改了忘记编译了
     opt = train_parser()
-    hypes = yaml_utils.load_yaml(opt.hypes_yaml, opt)
+    hypes = yaml_utils.LoadYAML(opt.hypes_yaml, opt)
 
     logger.important("Dataset Building")
     trainDataset = InterHeteroFusionDataset(hypes, False, True, OPV2VDataset)

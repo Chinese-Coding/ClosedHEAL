@@ -17,10 +17,9 @@ from opencood.data_utils.data_models.dataset_models import PFTimestampData, CAVD
 from opencood.data_utils.other.noise import GetNoiseGenerator
 from opencood.data_utils.post_processor import build_postprocessor
 from opencood.data_utils.pre_processor import build_preprocessor
-from opencood.hypes_yaml.yaml_utils import load_yaml
-from opencood.utils.camera_utils import load_camera_data
+from opencood.hypes_yaml.yaml_utils import LoadYAML
+from opencood.utils.camera_utils import LoadCameraData
 from opencood.utils.logger import get_logger
-from opencood.utils.transformation_utils import x1_to_x2
 
 logger = get_logger()
 
@@ -33,9 +32,9 @@ def _GetTimestampDataPath(cavPath: Path, timestamp: str):
     :param timestamp 时间戳
     """
     yaml_file, lidar_file = os.path.join(cavPath, f"{timestamp}.yaml"), os.path.join(cavPath, f"{timestamp}.pcd")
-    camera_files, depth_files = [cavPath / f"{timestamp}_camera{i}.png" for i in range(4)], [cavPath / f"{timestamp}_depth{i}.png" for i in range(4)] # fmt: skip
-    # 替换 "OPV2V" 为 "OPV2V_Hetero" 在 depth 文件路径中
-    depth_files = [p.with_name(p.name.replace("OPV2V", "OPV2V_Hetero")) for p in depth_files]
+    camera_files = [cavPath / f"{timestamp}_camera{i}.png" for i in range(4)]
+    cavPath = Path(str(cavPath).replace("OPV2V", "OPV2V_Hetero"))
+    depth_files = [cavPath / f"{timestamp}_depth{i}.png" for i in range(4)]
 
     return yaml_file, lidar_file, camera_files, depth_files
 
@@ -44,7 +43,7 @@ def _LoadParams(yamlFile: str):
     """
     Load params from YAML (同时将嵌套字典中的列表数据递归转换为 np.ndarray)
     """
-    params = load_yaml(yamlFile)
+    params = LoadYAML(yamlFile)
 
     def _ConvertToArray(data):
         match data:
@@ -60,7 +59,7 @@ def _LoadParams(yamlFile: str):
 
 def _ReplaceWithAdditional(filePath: str):
     """Replace the main folder with 'additional' if file is not found."""
-    return Path(filePath).with_name(
+    return (
         filePath.replace("train", "additional/train")
         .replace("validate", "additional/validate")
         .replace("test", "additional/test")
@@ -96,12 +95,8 @@ class OPV2VDataset(Dataset):
         self.GenerateObjectCenter = (
             self.GenerateObjectCenterLidar if self.label_type == "lidar" else self.generate_object_center_camera
         )
-        self.generate_object_center_single = (
-            self.GenerateObjectCenter
-        )  # will it follows 'self.generate_object_center' when 'self.generate_object_center' change?
-
-        if self.load_camera_file:
-            self.data_aug_conf = params["fusion"]["args"]["data_aug_conf"]
+        # will it follows 'self.generate_object_center' when 'self.generate_object_center' change?
+        self.generate_object_center_single = self.GenerateObjectCenter
 
         # by default, we load lidar, camera and metadata. But users may
         # define additional inputs/tasks
@@ -186,7 +181,7 @@ class OPV2VDataset(Dataset):
                     # load extra data
                     for file_extension in self.add_data_extension:
                         file_name = os.path.join(cav_path, timestamp + "_" + file_extension)
-                        pfTimestampData.file_extension = file_name
+                        pfTimestampData.file_extensions[file_extension] = file_name
 
                     self.scenario_database[i][cav_id][timestamp] = pfTimestampData
                 # Assume all cavs will have the same timestamps length. Thus
@@ -240,8 +235,8 @@ class OPV2VDataset(Dataset):
             cavData = CAVData(
                 ego=cav_content["ego"],
                 params=_LoadParams(cav_content[timestamp_key].yaml),
-                camera_data=load_camera_data(cav_content[timestamp_key].cameras) if self.load_camera_file else [],
-                depth_data=load_camera_data(cav_content[timestamp_key].depths) if self.load_depth_file else [],
+                camera_data=LoadCameraData(cav_content[timestamp_key].cameras) if self.load_camera_file else [],
+                depth_data=LoadCameraData(cav_content[timestamp_key].depths) if self.load_depth_file else [],
             )
 
             # load lidar file
@@ -254,11 +249,11 @@ class OPV2VDataset(Dataset):
             for file_extension in self.add_data_extension:
                 # if not find in the current directory
                 # go to additional folder
-                filePath = cav_content[timestamp_key][file_extension]
+                filePath = cav_content[timestamp_key].file_extensions[file_extension]
                 if not os.path.exists(filePath):
                     filePath = _ReplaceWithAdditional(filePath)
 
-                cavData[file_extension] = load_yaml(filePath) if ".yaml" in file_extension else cv2.imread(filePath)
+                cavData.file_extensions[file_extension] = _LoadParams(filePath) if ".yaml" in file_extension else cv2.imread(filePath) # fmt: skip
             data[cav_id] = cavData
         return data
 
@@ -292,8 +287,11 @@ class OPV2VDataset(Dataset):
 
         return lidar_np, object_bbx_center, object_bbx_mask
 
-    def GenerateObjectCenterLidar(self, cav_contents: List[CAVData], reference_lidar_pose: np.ndarray):
-        return self.post_processor.GenerateObjectCenter(cav_contents, reference_lidar_pose)
+    def GenerateObjectCenterLidar(self, cav_contents: List[CAVData], refLidarPose: np.ndarray[np.float64]):
+        return self.post_processor.GenerateObjectCenter(cav_contents, refLidarPose)
+
+    def GenerateObjectCenterCamera(self, cav_contents: List[CAVData], refLidarPose: np.ndarray[np.float64]):
+        return self.post_processor.GenerateVisibleObjectCenter(cav_contents, refLidarPose)
 
     def generate_object_center_lidar(self, cav_contents, reference_lidar_pose):
         """
@@ -353,13 +351,3 @@ class OPV2VDataset(Dataset):
             Length is number of bbx in current sample.
         """
         return self.post_processor.generate_visible_object_center(cav_contents, reference_lidar_pose)
-
-    def get_ext_int(self, params, camera_id):
-        """该函数可能会被其他类调用, 所以不可能为静态的"""
-        camera_coords = np.array(params["camera%d" % camera_id]["cords"]).astype(np.float32)
-        camera_to_lidar = x1_to_x2(camera_coords, params["lidar_pose_clean"]).astype(np.float32)  # T_LiDAR_camera
-        camera_to_lidar = camera_to_lidar @ np.array(
-            [[0, 0, 1, 0], [1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=np.float32
-        )  # UE4 coord to opencv coord
-        camera_intrinsic = np.array(params["camera%d" % camera_id]["intrinsic"]).astype(np.float32)
-        return camera_to_lidar, camera_intrinsic
