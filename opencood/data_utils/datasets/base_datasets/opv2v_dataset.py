@@ -5,21 +5,23 @@
 import os
 import random
 from pathlib import Path
-from typing import List, Dict, Union
+from typing import List, Dict
 
 import cv2
+import h5py
 import numpy as np
 from torch.utils.data import Dataset
 
 import opencood.utils.pcd_utils as pcd_utils
 from opencood.data_utils.augmentor.data_augmentor import DataAugmentor
-from opencood.data_utils.data_models.dataset_models import PFTimestampData, CAVData
+from opencood.data_utils.data_models.dataset_models import PFTimestampData, CAVData, HDF5Data
 from opencood.data_utils.other.noise import GetNoiseGenerator
 from opencood.data_utils.post_processor import build_postprocessor
 from opencood.data_utils.pre_processor import build_preprocessor
-from opencood.hypes_yaml.yaml_utils import LoadYAML
+from opencood.hypes_yaml.yaml_utils import LoadYAML, LoadYAMLFromStr
 from opencood.utils.camera_utils import LoadCameraData
 from opencood.utils.logger import get_logger
+from PIL import Image
 
 logger = get_logger()
 
@@ -31,7 +33,7 @@ def _GetTimestampDataPath(cavPath: Path, timestamp: str):
     :param cavPath 汽车所在路径
     :param timestamp 时间戳
     """
-    yaml_file, lidar_file = os.path.join(cavPath, f"{timestamp}.yaml"), os.path.join(cavPath, f"{timestamp}.pcd")
+    yaml_file, lidar_file = cavPath / f"{timestamp}.yaml", os.path.join(cavPath, f"{timestamp}.pcd")
     camera_files = [cavPath / f"{timestamp}_camera{i}.png" for i in range(4)]
     cavPath = Path(str(cavPath).replace("OPV2V", "OPV2V_Hetero"))
     depth_files = [cavPath / f"{timestamp}_depth{i}.png" for i in range(4)]
@@ -39,11 +41,12 @@ def _GetTimestampDataPath(cavPath: Path, timestamp: str):
     return yaml_file, lidar_file, camera_files, depth_files
 
 
-def _LoadParams(yamlFile: str):
-    """
-    Load params from YAML (同时将嵌套字典中的列表数据递归转换为 np.ndarray)
-    """
-    params = LoadYAML(yamlFile)
+def _LoadParams(yamlFile):
+    """Load params from YAML (同时将嵌套字典中的列表数据递归转换为 np.ndarray)"""
+    if isinstance(yamlFile, Path):
+        params = LoadYAML(yamlFile)
+    elif isinstance(yamlFile, str):
+        params = LoadYAMLFromStr(yamlFile)
 
     def _ConvertToArray(data):
         match data:
@@ -110,17 +113,65 @@ class OPV2VDataset(Dataset):
 
         # Structure: {scenario_id : {cav_1 : {timestamp1 : {yaml: path,
         # lidar: path, cameras:list of path}}}}
-        self.scenario_database: List[Dict[str, Dict[str, Union[PFTimestampData, bool]]]] = []
+        self.hdf5 = True  # 使用一下 hdf5
+        self.LoadDataPathFun = self._LoadHDF5DataPaths if self.hdf5 else self._Load4DataPaths
+        self.scenario_database: List[Dict[str, Dict[str, PFTimestampData | bool | HDF5Data]]] = []
         self.len_record = []
 
     @property
     def MaxCAV(self):
         return self.max_cav
 
+    def _LoadHDF5DataPaths(self, cav_path: Path, scenario_name: str, cav_id: str, j: int):
+        outputs = {}
+        hdf5FilePaths = sorted(file for file in cav_path.glob("*.hdf5"))
+        # 两个过滤的暂时不写
+        for filePath in hdf5FilePaths:
+            timestamp = filePath.stem
+            hdf5 = HDF5Data(filePath=filePath, lidar=str(filePath.with_suffix(".pcd")))
+            if self.hetero:
+                hdf5.modality_name = self.adaptor.ReassignCAVModality(scenario_name, cav_id, j)
+                hdf5.lidar = self.adaptor.switch_lidar_channels(hdf5.modality_name, hdf5.lidar)
+                # hdf5.lidarLines = self.adaptor.SwitchLidarChannels(hdf5.modality_name)
+            # load extra data
+            for file_extension in self.add_data_extension:
+                file_name = os.path.join(cav_path, timestamp + "_" + file_extension)
+                hdf5.file_extensions[file_extension] = file_name
+            outputs[timestamp] = hdf5
+        return outputs, len(hdf5FilePaths)
+
+    def _Load4DataPaths(self, cav_path: Path, scenario_name: str, cav_id: str, j: int):
+        outputs = {}
+        yaml_files: List[Path] = sorted(file for file in cav_path.glob("*.yaml") if "additional" not in file.stem)
+        # this timestamp is not ready
+        yaml_files = [
+            x for x in yaml_files
+            if not (("2021_08_20_21_10_24" in (path_str := str(x)) and "000265" in path_str) or "2021_09_09_13_20_58" in path_str) # fmt: skip
+        ]
+        timestamps = [file.stem for file in yaml_files]  # 来自GPT: 把提取 timestamp 函数删掉了 (一行代码完事)
+
+        for timestamp in timestamps:
+            # 将加载数据路径的函数, 移到了一个单独的函数中 (如果因为后面的代码还需要 `lidar_file` 我一定会让 `_GetTimestampDataPath` 函数返回一个字典)
+            yaml_file, lidar_file, camera_files, depth_files = _GetTimestampDataPath(cav_path, timestamp)
+            pfTimestampData = PFTimestampData(yaml=yaml_file, lidar=lidar_file, cameras=camera_files, depths=depth_files)
+
+            if self.hetero:
+                pfTimestampData.modality_name = self.adaptor.ReassignCAVModality(scenario_name, cav_id, j)
+                pfTimestampData.lidar = self.adaptor.switch_lidar_channels(pfTimestampData.modality_name, lidar_file)
+
+            # load extra data
+            for file_extension in self.add_data_extension:
+                file_name = os.path.join(cav_path, timestamp + "_" + file_extension)
+                pfTimestampData.file_extensions[file_extension] = file_name
+            outputs[timestamp] = pfTimestampData
+        return outputs, len(timestamps)
+
     def reinitialize(self):
         # 每次初始化的时候记得清空之前存储的东西 (如果是第一次初始化可能不需要, 但是为了统一写法就不做判断了)
         self.scenario_database.clear()
         self.len_record.clear()
+        # 定义一个新变量用于存储加载数据的方法, 这样写能缩短代码的长度, 其实也
+        LoadDataFun = self._LoadHDF5DataPaths if self.hdf5 else self._Load4DataPaths
 
         # loop over all scenarios
         for i, scenario_folder in enumerate(self.scenario_folders):
@@ -140,11 +191,9 @@ class OPV2VDataset(Dataset):
             if int(cav_list[0]) < 0:
                 cav_list = cav_list[1:] + [cav_list[0]]
 
-            """
-            make the first cav to be ego modality
-            """
+            """make the first cav to be ego modality"""
+            scenario_name = scenario_folder.stem  # 这个东西只有在 hetero 的时候才会用到
             if self.hetero:
-                scenario_name = scenario_folder.stem
                 cav_list = self.adaptor.reorder_cav_list(cav_list, scenario_name)
 
             # loop over all CAV data
@@ -152,38 +201,12 @@ class OPV2VDataset(Dataset):
                 if j > self.max_cav - 1:
                     logger.warning(f"In {scenario_folder.stem}, there are too many cavs reinitialize.")
                     break
-                self.scenario_database[i][cav_id] = {}
 
                 # save all yaml files to the dictionary
                 cav_path = scenario_folder / cav_id
+                outputs, timestampsLen = LoadDataFun(cav_path, scenario_name, cav_id, j)
+                self.scenario_database[i][cav_id] = outputs
 
-                yaml_files: List[Path] = sorted(file for file in cav_path.glob("*.yaml") if "additional" not in file.stem)
-                # this timestamp is not ready
-                # fmt: off
-                yaml_files = [
-                    x for x in yaml_files
-                    if not (("2021_08_20_21_10_24" in (path_str := str(x)) and "000265" in path_str) or "2021_09_09_13_20_58" in path_str)
-                ]  # fmt: on
-                timestamps = [file.stem for file in yaml_files]  # 来自GPT: 把提取 timestamp 函数删掉了 (一行代码完事)
-
-                for timestamp in timestamps:
-                    # 将加载数据路径的函数, 移到了一个单独的函数中 (如果因为后面的代码还需要 `lidar_file` 我一定会让 `_GetTimestampDataPath` 函数返回一个字典)
-                    yaml_file, lidar_file, camera_files, depth_files = _GetTimestampDataPath(cav_path, timestamp)
-                    pfTimestampData = PFTimestampData(
-                        yaml=yaml_file, lidar=lidar_file, cameras=camera_files, depths=depth_files
-                    )
-
-                    if self.hetero:
-                        scenario_name = scenario_folder.stem
-                        pfTimestampData.modality_name = self.adaptor.ReassignCAVModality(scenario_name, cav_id, j)
-                        pfTimestampData.lidar = self.adaptor.switch_lidar_channels(pfTimestampData.modality_name, lidar_file)
-
-                    # load extra data
-                    for file_extension in self.add_data_extension:
-                        file_name = os.path.join(cav_path, timestamp + "_" + file_extension)
-                        pfTimestampData.file_extensions[file_extension] = file_name
-
-                    self.scenario_database[i][cav_id][timestamp] = pfTimestampData
                 # Assume all cavs will have the same timestamps length. Thus
                 # we only need to calculate for the first vehicle in the
                 # scene.
@@ -192,11 +215,10 @@ class OPV2VDataset(Dataset):
                     self.scenario_database[i][cav_id]["ego"] = True
                     # 来自GPT: 延迟计算 len_record： 在更新 len_record 时，可以直接将长度累加计算合并到一次操作中，减少冗余代码
                     total_len = self.len_record[-1] if self.len_record else 0
-                    self.len_record.append(total_len + len(timestamps))
+                    self.len_record.append(total_len + timestampsLen)
                 else:
                     self.scenario_database[i][cav_id]["ego"] = False
-        prefix = "训练集" if self.train else "验证集"
-        logger.important(f"{prefix}数据总长度: {self.len_record[-1]}")
+        logger.important(f"{self.train=}数据总长度: {self.len_record[-1]}")
 
     def _GetScenarioIndex(self, idx):
         """Find the correct scenario index based on idx."""
@@ -209,16 +231,8 @@ class OPV2VDataset(Dataset):
         """
         Given the index, return the corresponding data.
 
-        Parameters
-        ----------
-        idx : int
-            Index given by dataloader.
-
-        Returns
-        -------
-        data : dict
-            The dictionary contains loaded yaml params and lidar data for
-            each cav.
+        :param idx: Index given by dataloader
+        :return: The dictionary contains loaded yaml params and lidar data for each cav.
         """
         # we loop the accumulated length list to see get the scenario index
         scenario_index = self._GetScenarioIndex(idx)
@@ -232,19 +246,29 @@ class OPV2VDataset(Dataset):
         data: Dict[str, CAVData] = {}
         # load files for all CAVs
         for cav_id, cav_content in scenario_database.items():
-            cavData = CAVData(
-                ego=cav_content["ego"],
-                params=_LoadParams(cav_content[timestamp_key].yaml),
-                camera_data=LoadCameraData(cav_content[timestamp_key].cameras) if self.load_camera_file else [],
-                depth_data=LoadCameraData(cav_content[timestamp_key].depths) if self.load_depth_file else [],
-            )
+            timestampData = cav_content[timestamp_key]
+            if self.hdf5:
+                with h5py.File(timestampData.filePath, "r") as f:
+                    cavData = CAVData(
+                        ego=cav_content["ego"],
+                        params=_LoadParams(f["yaml_file"][()].decode("utf-8")),
+                        camera_data=([Image.fromarray(f[f"camera{i}"][()]) for i in range(4)] if self.load_camera_file else []),
+                        depth_data=([Image.fromarray(f[f"depth{i}"][()]) for i in range(4)] if self.load_depth_file else []),
+                    )
+            else:
+                cavData = CAVData(
+                    ego=cav_content["ego"],
+                    params=_LoadParams(timestampData.yaml),
+                    camera_data=LoadCameraData(timestampData.cameras) if self.load_camera_file else [],
+                    depth_data=LoadCameraData(timestampData.depths) if self.load_depth_file else [],
+                )
 
             # load lidar file
             if self.load_lidar_file or self.visualize:
-                cavData.lidar_np = pcd_utils.pcd_to_np(cav_content[timestamp_key].lidar)
+                cavData.lidar_np = pcd_utils.pcd_to_np(timestampData.lidar)
 
             if self.hetero:
-                cavData.modality_name = cav_content[timestamp_key].modality_name
+                cavData.modality_name = timestampData.modality_name
 
             for file_extension in self.add_data_extension:
                 # if not find in the current directory

@@ -37,6 +37,13 @@ def LoadYAML(file, opt=None):
     return param
 
 
+def LoadYAMLFromStr(yamlStr: str):
+    param = yaml.load(yamlStr, Loader=loader)
+    if "yaml_parser" in param:
+        param = eval(param["yaml_parser"])(param)
+    return param
+
+
 def _LoadGeneralParams(param):
     basicDir = os.path.expanduser(param["basic_dir"])
     param["root_dir"] = os.path.join(basicDir, param["root_dir"])

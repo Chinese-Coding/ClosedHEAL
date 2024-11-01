@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 # Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
 # License: TDG-Attribution-NonCommercial-NoDistrib
-
+import argparse
+import time
 from multiprocessing import Process
 from pathlib import Path
 from threading import Thread
@@ -37,6 +38,14 @@ def _LoadDepthFiles(cav_path: Path, timestamp: str, name: str):
     return _LoadCameraFiles(cav_path, timestamp, name)
 
 
+def _LoadHeteroFiles(cav_path: Path, timestamp: str):
+    lidar_files = {"64": cav_path / f"{timestamp}.pcd"}
+    cav_path = Path(str(cav_path).replace("OPV2V", "OPV2V_Hetero"))  # 使用 `str` 会创建一个新对象不会影响原来的路径字符串
+    lidar_files.update({"32": cav_path / f"{timestamp}_32.pcd", "16": cav_path / f"{timestamp}_16.pcd"})
+    depth_files = [cav_path / f"{timestamp}_depth{i}.png" for i in range(4)]
+    return lidar_files, depth_files
+
+
 def _Transform(cav_path: Path, timestamp: str):
     hdf5 = cav_path / f"{timestamp}_imgs.hdf5"
     if hdf5.exists():
@@ -60,19 +69,21 @@ def _TransformAll(cav_path: Path, timestamp: str):
     if hdf5.exists():
         logger.warning(f"已存在 {hdf5} 文件, 跳过")
         return
-    yaml_file, lidar_file = cav_path / f"{timestamp}.yaml", cav_path / f"{timestamp}.pcd"
-    camera_files, depth_files = _LoadCameraFiles(cav_path, timestamp, name="camera"), _LoadDepthFiles(
-        cav_path, timestamp, name="depth"
-    )
 
-    with open(yaml_file, "rb") as yf, open(lidar_file, "rb") as lf:
-        yaml_data, lidar_data = yf.read(), lidar_file.read()
+    yaml_file, camera_files = cav_path / f"{timestamp}.yaml", [cav_path / f"{timestamp}_camera{i}.png" for i in range(4)]
+    lidar_files, depth_files = _LoadHeteroFiles(cav_path, timestamp)
 
     camera_data, depth_data = _LoadCameraData(camera_files), _LoadCameraData(depth_files)
 
     with h5py.File(hdf5, "w") as f:
-        f.create_dataset("yaml_file", data=yaml_data, dtype=h5py.special_dtype(vlen=bytes))
-        f.create_dataset("lidar_file", data=lidar_data, dtype=h5py.special_dtype(vlen=bytes))
+        with open(yaml_file, "rb") as yf:
+            f.create_dataset("yaml_file", data=yf.read(), dtype=h5py.special_dtype(vlen=bytes))
+
+        for k, v in lidar_files.items():
+
+            with open(v, "rb") as lf:
+                f.create_dataset(k, data=lf.read(), dtype=h5py.special_dtype(vlen=bytes))
+
         for i in range(4):
             f.create_dataset(f"camera{i}", data=camera_data[i])
         for i in range(4):
@@ -80,16 +91,23 @@ def _TransformAll(cav_path: Path, timestamp: str):
     # logger.success(f"{hdf5} 创建成功")
 
 
-def _ClearUP(cav_path: Path, timestamp: str):
+def _ClearUp(cav_path: Path, timestamp: str):
     hdf5 = cav_path / f"{timestamp}_imgs.hdf5"
     if hdf5.exists():
         hdf5.unlink()
         # logger.success("文件删除成功")
 
 
+def _ClearUpAll(cav_path: Path, timestamp: str):
+    hdf5 = cav_path / f"{timestamp}.hdf5"
+    if hdf5.exists():
+        hdf5.unlink()
+
+
 def _Parallel(scenario_folders: List[Path], fun, processId: int):
     logger.success(f"subprocess {processId} 启动!")
-    for scenario_folder in tqdm(scenario_folders, desc=f"{processId}"):
+    startTime = time.time()
+    for scenario_folder in tqdm(scenario_folders, desc=f"Process {processId}", position=processId, leave=False):
         cav_list: List[str] = [cav.name for cav in scenario_folder.iterdir() if cav.is_dir()]
         assert len(cav_list) > 0
 
@@ -99,7 +117,13 @@ def _Parallel(scenario_folders: List[Path], fun, processId: int):
             yaml_files: List[Path] = sorted(file for file in cav_path.glob("*.yaml") if "additional" not in file.stem)
             timestamps = [file.stem for file in yaml_files]
             for timestamp in timestamps:
-                fun(cav_path, timestamp)
+                try:
+                    fun(cav_path, timestamp)
+                except FileNotFoundError as e:
+                    logger.error(f"File not found in process {processId}: {e}")
+                except Exception as e:
+                    logger.error(f"Unexpected error in process {processId}: {e}")
+    logger.success(f"subprocess {processId} finished! 消耗时间: {time.time() - startTime}")
 
 
 def _ThreadVersion(MP_NUM, mp_split):
@@ -117,14 +141,26 @@ def _ThreadVersion(MP_NUM, mp_split):
         t.join()
 
 
-def _ProcessVersion(MP_NUM, mp_split):
-    for i in range(MP_NUM):
-        p = Process(target=_Parallel, args=(mp_split[i], _Transform, i))
-        p.start()
+def _ProcessVersion(MP_NUM, mp_split, fun):
+    processes = [Process(target=_Parallel, args=(mp_split[i], fun, i)) for i in range(MP_NUM)]
+    # 奇怪必须用列表推导式子来干这件事
+    [process.start() for process in processes]
+    [process.join() for process in processes]
+
+
+def _Parser():
+    parser = argparse.ArgumentParser(description="数据集到 HDF5 数据类型转换")
+    parser.add_argument("--processNumber", default=8)
+    parser.add_argument("--function", default="ClearUPAll")
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    MP_NUM = 8
+    startTime = time.time()
+    opt = _Parser()
+    funs = {"ClearUp": _ClearUp, "ClearUpAll": _ClearUpAll, "Transform": _Transform, "TransformAll": _TransformAll}
+    MP_NUM = opt.processNumber
+    fun = funs[opt.function]
     rootDir = Path("~/Desktop").expanduser()
     split_folders = [rootDir / f"dataset/OPV2V/{split}" for split in ["train", "validate", "test"]]
     scenario_folders = []
@@ -140,4 +176,5 @@ if __name__ == "__main__":
     mp_split = np.array_split(scenario_folders, MP_NUM)
     mp_split = [x.tolist() for x in mp_split]
 
-    _ProcessVersion(MP_NUM, mp_split)
+    _ProcessVersion(MP_NUM, mp_split, fun)
+    logger.success(f"总消耗时间: {time.time() - startTime}")

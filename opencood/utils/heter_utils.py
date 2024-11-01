@@ -100,6 +100,10 @@ class Adaptor:
             return lidar_file_path.replace("OPV2V", "OPV2V_Hetero").replace(".pcd", "_16.pcd")
         return lidar_file_path
 
+    def SwitchLidarChannels(self, cav_modality):
+        """Currently only support OPV2V"""
+        return str(self.lidar_channels_dict.get(cav_modality, 64))
+
 
 def assign_modality_4(root_dir="dataset/OPV2V", output_path="opencood/logs/heter_modality_assign/opv2v_4modality.json"):
     np.random.seed(303)

@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Literal
 
 import numpy as np
 from PIL import Image
@@ -11,7 +11,7 @@ PF: path for
 
 
 class PFTimestampData(BaseModel):
-    yaml: str
+    yaml: Path
     lidar: str
     cameras: List[Path]
     depths: List[Path]
@@ -29,6 +29,14 @@ class PFTimestampData(BaseModel):
             setattr(self, key, value)
         else:
             raise KeyError(f"Key '{key}' not found in {self.__class__.__name__}")
+
+
+class HDF5Data(BaseModel):
+    filePath: Path
+    # lidarLines: Literal["16", "32", "64"] = "64" # 因为 open3d 不支持从内存中读取 pcd 形式的点云, 所以暂时放弃这个字段
+    lidar: str
+    modality_name: Optional[str] = None
+    file_extensions: Dict[str, str] = Field(default_factory=dict)
 
 
 class CAVData(BaseModel):

@@ -33,6 +33,18 @@ def pcd_to_np(pcd_file: str):
     return np.asarray(pcd_np, dtype=np.float64)  # 这里改成 np.float64 为了方便后续计算的统一
 
 
+def PCDToNP(data: bytes):
+    # 该 api 仅支持 xyz 形式的数据, 对 pcd 类型不支持, 所以放弃 hdf5 存储文件点云数据的支持
+    pcd = o3d.io.read_point_cloud_from_bytes(data)
+
+    xyz = np.asarray(pcd.points)
+    # we save the intensity in the first channel
+    intensity = np.expand_dims(np.asarray(pcd.colors)[:, 0], -1)
+    pcd_np = np.hstack((xyz, intensity))
+
+    return np.asarray(pcd_np, dtype=np.float64)  # 这里改成 np.float64 为了方便后续计算的统一
+
+
 def mask_points_by_range(points, limit_range):
     """
     Remove the lidar points out of the boundary.
