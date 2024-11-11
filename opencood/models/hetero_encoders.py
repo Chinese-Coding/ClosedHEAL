@@ -29,12 +29,12 @@ class PointPillar(nn.Module):
         )
         self.scatter = PointPillarScatter(args["point_pillar_scatter"])
 
-    def forward(self, data_dict, modality_name):
-        voxel_features = data_dict[f"inputs_{modality_name}"]["voxel_features"]
-        voxel_coords = data_dict[f"inputs_{modality_name}"]["voxel_coords"]
-        voxel_num_points = data_dict[f"inputs_{modality_name}"]["voxel_num_points"]
-
-        batch_dict = {"voxel_features": voxel_features, "voxel_coords": voxel_coords, "voxel_num_points": voxel_num_points}
+    def forward(self, inputs):
+        batch_dict = {
+            "voxel_features": inputs["voxel_features"],
+            "voxel_coords": inputs["voxel_coords"],
+            "voxel_num_points": inputs["voxel_num_points"],
+        }
 
         batch_dict = self.pillar_vfe(batch_dict)
         batch_dict = self.scatter(batch_dict)
@@ -263,14 +263,13 @@ class LiftSplatShoot(nn.Module):
 
         return x, depth_items
 
-    def forward(self, data_dict, modality_name):
+    def forward(self, image_inputs_dict):
         # x: [4,4,3,256, 352]
         # rots: [4,4,3,3]
         # trans: [4,4,3]
         # intrins: [4,4,3,3]
         # post_rots: [4,4,3,3]
         # post_trans: [4,4,3]
-        image_inputs_dict = data_dict[f"inputs_{modality_name}"]
         x, rots, trans, intrins, post_rots, post_trans = (
             image_inputs_dict["imgs"],
             image_inputs_dict["rots"],
@@ -279,9 +278,9 @@ class LiftSplatShoot(nn.Module):
             image_inputs_dict["post_rots"],
             image_inputs_dict["post_trans"],
         )
-        x, depth_items = self.get_voxels(
-            x, rots, trans, intrins, post_rots, post_trans
-        )  # 将图像转换到BEV下，x: B x C x 240 x 240 (4 x 64 x 240 x 240)
+
+        # 将图像转换到BEV下，x: B x C x 240 x 240 (4 x 64 x 240 x 240)
+        x, depth_items = self.get_voxels(x, rots, trans, intrins, post_rots, post_trans)
 
         if self.depth_supervision:
             self.depth_items = depth_items
