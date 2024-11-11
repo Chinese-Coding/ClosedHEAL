@@ -3,11 +3,15 @@ from opencood.utils.cython.all_use cimport cnp, F64_t, I64_t
 
 from opencood.utils.cython.box_utils cimport BoxesToCorners3D, Corner2dToStandupBox
 
+
+
+
 cdef _GetAnchorArgs(dict anchorArgs):
     return (
         anchorArgs["W"], anchorArgs["H"], anchorArgs["l"], anchorArgs["w"], anchorArgs["h"], anchorArgs["r"],
         anchorArgs["vh"], anchorArgs["vw"], anchorArgs["cav_lidar_range"], anchorArgs.get("feature_stride", 2)
     )
+
 
 cdef _GetCenter(int anchor_num, cnp.ndarray[F64_t, ndim=1] x, cnp.ndarray[F64_t, ndim=1] y):
     cdef cnp.ndarray[F64_t, ndim=2] cx2d, cy2d
@@ -17,6 +21,7 @@ cdef _GetCenter(int anchor_num, cnp.ndarray[F64_t, ndim=1] x, cnp.ndarray[F64_t,
     cx, cy = np.tile(cx2d[..., np.newaxis], anchor_num), np.tile(cy2d[..., np.newaxis], anchor_num)
     cz = np.ones_like(cx) * -1.0
     return cx, cy, cz
+
 
 def GenerateAnchorBox(dict anchorArgs, int anchor_num, str order):
     # load_voxel_params and load_point_pillar_params leads to the same anchor
@@ -46,6 +51,7 @@ def GenerateAnchorBox(dict anchorArgs, int anchor_num, str order):
         return np.stack([cx, cy, cz, l_, h_, w_, r_], axis=-1)
     else:
         raise NotImplementedError(f"{order} is unknown bbx order.")
+
 
 cdef cnp.ndarray[F64_t, ndim=2] _BboxOverlaps(cnp.ndarray[F64_t, ndim=2] boxes, cnp.ndarray[F64_t, ndim=2] query_boxes):
     """
@@ -78,7 +84,6 @@ cdef cnp.ndarray[F64_t, ndim=2] _BboxOverlaps(cnp.ndarray[F64_t, ndim=2] boxes, 
     return overlaps
 
 
-
 def GenerateLabel(
         cnp.ndarray[F64_t, ndim=2] gt_box_center, cnp.ndarray[F64_t, ndim=4] anchors, cnp.ndarray[I64_t, ndim=1] masks,
         int anchor_num, str order, double targetPosThreshold, double targetNegThreshold,
@@ -89,6 +94,7 @@ def GenerateLabel(
     :param gt_box_center: shape: (max_num, 7)
     :param anchors:       shape: (H, W, anchor_num, 7)
     :param masks:         shape: (max_num, )
+    :param anchor_num: 单个点生成的 anchor 个数, 一般是 2
     """
     # `cdef tuple[unsigned int, unsigned int] ` 去掉，不兼容
     feature_map_shape = (anchors.shape[0], anchors.shape[1]) # shape: (H, W)
@@ -98,8 +104,8 @@ def GenerateLabel(
 
     cdef cnp.ndarray[F64_t, ndim=3] pos_equal_one, neg_equal_one, targets
 
-    pos_equal_one, neg_equal_one = np.zeros((*feature_map_shape, anchor_num)), np.zeros((*feature_map_shape, anchor_num)) # shape:  (H, W, 2)
-    targets = np.zeros((*feature_map_shape, anchor_num * 7)) # shape: (H, W, self.anchor_num * 7)
+    pos_equal_one, neg_equal_one = np.zeros((*feature_map_shape, anchor_num)), np.zeros((*feature_map_shape, anchor_num)) # shape:  (H, W, anchor_num)
+    targets = np.zeros((*feature_map_shape, anchor_num * 7)) # shape: (H, W, anchor_num * 7)
 
     cdef cnp.ndarray[F64_t, ndim=2] gt_box_center_valid, anchors_standup_2d, gt_standup_2d
     cdef cnp.ndarray[F64_t, ndim=3] gt_box_center_valid3D, anchors_corner
@@ -156,6 +162,4 @@ def GenerateLabel(
     index_x, index_y, index_z = np.unravel_index(id_highest, (*feature_map_shape, anchor_num))
     neg_equal_one[index_x, index_y, index_z] = 0
 
-    label_dict = {"pos_equal_one": pos_equal_one, "neg_equal_one": neg_equal_one, "targets": targets}
-
-    return label_dict
+    return {"pos_equal_one": pos_equal_one, "neg_equal_one": neg_equal_one, "targets": targets}

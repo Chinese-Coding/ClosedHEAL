@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
 # License: TDG-Attribution-NonCommercial-NoDistrib
-
+from typing import Dict
 
 import numpy as np
 import torch
@@ -17,7 +17,7 @@ from opencood.utils.camera_utils import gen_dx_bx, cumsum_trick, QuickCumsum, de
 
 
 class PointPillar(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args: Dict):
         super(PointPillar, self).__init__()
         grid_size = (np.array(args["lidar_range"][3:6]) - np.array(args["lidar_range"][0:3])) / np.array(args["voxel_size"])
         grid_size = np.round(grid_size).astype(np.int64)

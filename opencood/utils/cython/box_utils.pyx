@@ -79,37 +79,12 @@ cdef cnp.ndarray[F64_t, ndim=2] CornerToCenter(cnp.ndarray[F64_t, ndim=3] corner
 cpdef cnp.ndarray[F64_t, ndim=3] BoxesToCorners3D(cnp.ndarray[F64_t, ndim=2] boxes3d, str order):
     """
     将三维边界框参数转换为其对应的八个角点坐标。
-
-    参数
-    ----------
-    boxes3d : np.ndarray
-        形状为 (N, 7) 的数组，表示 N 个三维边界框。
-        每个边界框的参数可以是 [x, y, z, l, w, h, heading]，
-        或者 [x, y, z, h, w, l, heading]，取决于 `order` 参数。
-        - (x, y, z) 是边界框的中心点坐标。
-        - l, w, h 分别是边界框的长度、宽度和高度。
-        - heading 是边界框绕 z 轴的旋转角度（弧度）。
-
-    order : str
-        尺寸顺序，可以是 'lwh' 或 'hwl'。默认为 'lwh'。
-
-    返回
-    -------
-    corners3d : np.ndarray
-        形状为 (N, 8, 3) 的数组，表示每个边界框的八个角点的三维坐标。
-
-    示例
-    -------
-    ```python
-    boxes3d = np.array([
-        [0, 0, 0, 2, 4, 6, np.pi / 4]  # [x, y, z, l, w, h, heading]
-    ])
-    corners = boxes_to_corners_3d_numpy(boxes3d, order='lwh')
-    print(corners)
-    ```
+    
+    :param boxes3d: shape: (N, 7)  每个边界框的参数可以是 `[x, y, z, l, w, h, heading]`, 或者 `[x, y, z, h, w, l, heading]`, 取决于 `order` 参数
+                    `x, y, z` 是边界框的中心点坐标; `l, w, h` 分别是边界框的长度、宽度和高度; `heading` 是边界框绕 z 轴的旋转角度 (弧度)
+    :param order:  尺寸顺序, 可以是 `lwh` 或 `hwl`. 默认为 `lwh`.
+    :return: shape: (N, 8, 3), 表示每个边界框的八个角点的三维坐标
     """
-
-
     if order == "hwl": # 处理尺寸顺序
         boxes3d = boxes3d[:, [0, 1, 2, 5, 4, 3, 6]]
 
@@ -119,20 +94,22 @@ cpdef cnp.ndarray[F64_t, ndim=3] BoxesToCorners3D(cnp.ndarray[F64_t, ndim=2] box
     cdef cnp.ndarray[F64_t, ndim=2] template
 
     # 提取中心点、尺寸和旋转角度
-    centers, dims = boxes3d[:, 0:3], boxes3d[:, 3:6]
-    headings = boxes3d[:, 6]
+    centers, dims, headings = boxes3d[:, 0:3], boxes3d[:, 3:6], boxes3d[:, 6]
 
     # 定义八个角点的相对位置（单位立方体）
+    """
+        4 -------- 5      ^z
+       /|         /|      |    x
+      7 -------- 6 .      |  /
+      | |        | |      | /
+      . 0 -------- 1      |/
+      |/         |/       +--------->y
+      3 -------- 2
+    """
     template = np.array([
-        [1, -1, -1],
-        [1, 1, -1],
-        [-1, 1, -1],
-        [-1, -1, -1],
-        [1, -1, 1],
-        [1, 1, 1],
-        [-1, 1, 1],
-        [-1, -1, 1],
-    ]) / 2
+        [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, -1], # 0, 1, 2, 3
+        [1, -1, 1],  [1, 1, 1],  [-1, 1, 1],  [-1, -1, 1],  # 4, 5, 6, 7
+    ]) / 2 # shape: (8, 3)
 
     # 扩展维度并缩放到边界框尺寸
     corners = dims[:, np.newaxis, :] * template[np.newaxis, :, :]  # 广播相乘

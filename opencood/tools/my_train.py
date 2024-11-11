@@ -196,13 +196,6 @@ def main():
     logger.important(f"总训练时长: {sum(usingTimeList)}s, 一轮平均耗时: {sum(usingTimeList) / len(usingTimeList)}s")
     logger.important(f"Training Finished, checkpoints saved to {saved_path}")
 
-    run_test = True
-    if run_test:
-        fusion_method = opt.fusion_method
-        cmd = f"python opencood/tools/my_inference.py --model_dir {saved_path} --fusion_method {fusion_method}"
-        print(f"Running command: {cmd}")
-        os.system(cmd)
-
 
 if __name__ == "__main__":
     main()

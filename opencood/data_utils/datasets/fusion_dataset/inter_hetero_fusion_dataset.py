@@ -60,7 +60,6 @@ def _GetUniqueObjects(object_id_stack, object_stack):
 
 
 def _GetExtInt(params, camera_id) -> Tuple[np.ndarray[np.float64], np.ndarray[np.float64]]:
-    """该函数可能会被其他类调用, 所以不可能为静态的"""
     camera_coords, camera_intrinsic = params[f"camera{camera_id}"]["cords"], params[f"camera{camera_id}"]["intrinsic"]
     camera_to_lidar = X1ToX2(camera_coords, params["lidar_pose_clean"])  # T_LiDAR_camera
     # UE4 coord to opencv coord
@@ -92,16 +91,13 @@ def _ConvertToTensors(data: Any, dtype: torch.dtype = torch.float32, device: Uni
 
 
 class InterHeteroFusionDataset(Dataset):
-    """
-    删除一些看不懂的标志变量, 以及一些对于其他类型的数据集的处理
-    """
+    """删除一些看不懂的标志变量, 以及一些对于其他类型的数据集的处理"""
 
     def __init__(self, params, visualize, train, baseDataset: Type[OPV2VDataset]):
         super().__init__()
-        self.params = params
         self.visualize, self.train, self.hetero = visualize, train, True
         self.comm_range = params["comm_range"]
-
+        self.max_num = params["postprocess"]["max_num"]
         # fmt: off
         heteroParams = params["hetero"]
         self.modality_assignment, self.ego_modality, self.modality_name_list = (
@@ -282,7 +278,7 @@ class InterHeteroFusionDataset(Dataset):
         agent_modality_list, object_stack, object_id_stack = [], [], []  # 多车所需要的数据
         single_label_list, single_object_bbx_center_list, single_object_bbx_mask_list = [], [], []  # 单车所需要的一系列数据
 
-        for _i, cav_id in enumerate(legalCAVIdList):
+        for cav_id in legalCAVIdList:
             legalCAVData = base_data_dict[cav_id]
             modality_name = legalCAVData.modality_name
             sensor_type = self.sensor_type_dict[modality_name]
@@ -319,16 +315,10 @@ class InterHeteroFusionDataset(Dataset):
             if self.visualize:
                 projected_lidar_stack.append(selected_cav_processed["projected_lidar"])
 
-        # 整合单车数据
-        single_label_dicts = self.baseDataset.post_processor.collate_batch(single_label_list)
-        single_object_bbx_center = torch.from_numpy(np.array(single_object_bbx_center_list))
-        single_object_bbx_mask = torch.from_numpy(np.array(single_object_bbx_mask_list))
-
         object_id_stack, object_stack = _GetUniqueObjects(object_id_stack, object_stack)
 
         # make sure bounding boxes across all frames have the same number
-        max_num = self.params["postprocess"]["max_num"]
-        object_bbx_center, mask = np.zeros((max_num, 7)), np.zeros(max_num, dtype=np.int64)
+        object_bbx_center, mask = np.zeros((self.max_num, 7)), np.zeros(self.max_num, dtype=np.int64)
         object_bbx_center[: object_stack.shape[0], :], mask[: object_stack.shape[0]] = object_stack, 1
 
         # 这一段代码我看不懂这是在干什么
@@ -340,22 +330,20 @@ class InterHeteroFusionDataset(Dataset):
                 merged_image_inputs_dict = merge_features_to_dict(inputListModalities[modality_name], merge="stack")
                 processed_data_dict["ego"].update({f"input_{modality_name}": merged_image_inputs_dict})  # maybe None
 
-        # generate targets label
-        label_dict = self.baseDataset.post_processor.GenerateLabel(object_bbx_center, self.anchor_box, mask)
         lidar_poses_clean, lidar_poses = _GetLidarPoses(base_data_dict, legalCAVIdList)
 
         processed_data_dict["ego"].update({
             # 单车信息
-            "single_label_dict_torch": single_label_dicts,
-            "single_object_bbx_center_torch": single_object_bbx_center,
-            "single_object_bbx_mask_torch": single_object_bbx_mask,
+            "single_label_dict_torch": self.baseDataset.post_processor.collate_batch(single_label_list),
+            "single_object_bbx_center_torch": torch.from_numpy(np.array(single_object_bbx_center_list)),
+            "single_object_bbx_mask_torch": torch.from_numpy(np.array(single_object_bbx_mask_list)),
             # 多车信息
             "agent_modality_list": agent_modality_list,
             "object_bbx_center": object_bbx_center,
             "object_bbx_mask": mask,
             "object_ids": object_id_stack,
             "anchor_box": self.anchor_box,
-            "label_dict": label_dict,
+            "label_dict": self.baseDataset.post_processor.GenerateLabel(object_bbx_center, self.anchor_box, mask),
             "cav_num": len(legalCAVIdList),
             "pairwise_t_matrix": GetPairwiseTransformation(base_data_dict, self.baseDataset.MaxCAV, False),
             "lidar_poses_clean": lidar_poses_clean,
