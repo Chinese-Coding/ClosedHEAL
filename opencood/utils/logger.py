@@ -1,4 +1,5 @@
 import functools
+import os
 
 from loguru import logger as loguru_logger
 
@@ -23,6 +24,9 @@ def logger_wraps(level):
 class Logger:
     def __init__(self):
         self.logger = loguru_logger
+
+    def add(self, savePath):
+        self.logger.add(os.path.join(savePath, "logfile.log"), level="INFO", rotation="10 MB")
 
     def _log(self, level, message):
         # 通用的日志记录方法

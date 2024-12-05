@@ -1,7 +1,3 @@
-# -*- coding: utf-8 -*-
-# Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
-# License: TDG-Attribution-NonCommercial-NoDistrib
-import random
 from typing import Dict
 
 import torch
@@ -14,11 +10,7 @@ from opencood.loss.point_pillar_loss import sigmoid_focal_loss
 
 def _DecoupleMatrixDiag(matrix):
     nonDiagMask = ~torch.eye(matrix.size(0), dtype=bool)
-    try:
-        return torch.diag(matrix), matrix[nonDiagMask]
-    except IndexError:
-        breakpoint()
-        pass
+    return torch.diag(matrix), matrix[nonDiagMask]
 
 
 def _CalcCLoss(CMatrix, lambdaC):
@@ -40,7 +32,8 @@ class HeteroPyramidLoss(PointPillarDepthLoss):
         self.relative_downsample = self.pyramid["relative_downsample"]
         self.pyramid_weight = self.pyramid["weight"]
         self.num_levels = len(self.relative_downsample)
-        self.cuRatio = {}
+        self.cuRatio = args["cuRatio"]
+        self.lambdaC, self.lambdaU = args.get("lambdaC", 1), args.get("lambdaU", 1)
 
     """
     # H, W = v1.shape[2:]
@@ -70,8 +63,9 @@ class HeteroPyramidLoss(PointPillarDepthLoss):
         for k1, v1 in processed_features.items():
             for k2, v2 in processed_features.items():
                 if k1 != k2 and v1.size(0) == v2.size(0):
-                    if self.cuRatio.get(k1 + k2, None) is None or self.cuRatio.get(k2 + k1, None) is None:
-                        self.cuRatio[k1 + k2] = self.cuRatio[k2 + k1] = random.random()
+                    ratio = self.cuRatio.get(k1 + k2, self.cuRatio.get(k2 + k1, None))
+                    if ratio is None:
+                        raise Exception(f"cuRatio 中没有 {k1 + k2} 这种模态组合")
                     gap1, gap2 = torch.nn.AdaptiveAvgPool2d(1)(v1), torch.nn.AdaptiveAvgPool2d(1)(v2)
                     # 同一场景下不同模态车的数量可能还不尽相同, shape[0] 的值不可能一直为 1
                     # 还有可能在某一场景下只有一种模态, 加一个判断语句 `and v1.size(0) == v2.size(0)`
@@ -79,9 +73,9 @@ class HeteroPyramidLoss(PointPillarDepthLoss):
                     gap1, gap2 = gap1.reshape(-1), gap2.reshape(-1)
 
                     featureMatrix = gap1.outer(gap2) / batch_size  # Tried to allocate 65536.00 GiB.
-                    CFeatureLen = int(gap1.shape[0] * self.cuRatio[k1 + k2])
+                    CFeatureLen = int(gap1.shape[0] * ratio)
                     CMatrix, UMatrix = (featureMatrix[:CFeatureLen, :CFeatureLen], featureMatrix[CFeatureLen:, CFeatureLen:])
-                    loss += _CalcCLoss(CMatrix, 1) + _CalaULoss(UMatrix, 1)
+                    loss += _CalcCLoss(CMatrix, self.lambdaC) + _CalaULoss(UMatrix, self.lambdaU)
         return loss
 
     def forward(self, output_dict, target_dict, suffix=""):
@@ -109,8 +103,8 @@ class HeteroPyramidLoss(PointPillarDepthLoss):
             total_loss = super().forward(output_dict, target_dict)
             processed_features = output_dict["processed_features"]
             cu_loss = self._CalcCULoss(processed_features, target_dict["pos_equal_one"].shape[0])
-            self.loss_dict.update({"cu_loss": 0 if cu_loss == 0 else cu_loss.item()})
-            total_loss += cu_loss
+            total_loss += cu_loss  # 更新数值的时候记得更新字典
+            self.loss_dict.update({"cu_loss": 0 if cu_loss == 0 else cu_loss.item(), "total_loss": total_loss.item()})
             return total_loss
 
         assert suffix == "_single"

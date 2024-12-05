@@ -130,10 +130,7 @@ class HeteroPyramidCollab(nn.Module):
                 if eval(f"self.depth_supervision_{modality_name}"):
                     output_dict.update({f"depth_items_{modality_name}": eval(f"self.encoder_{modality_name}").depth_items})
             modality_feature_dict[modality_name] = feature
-
-            # 对用于计算共同特征和私有特征的 Loss 的 feature 进行一个简单地裁切
-            crop_func = torchvision.transforms.CenterCrop((128, 128))
-            output_dict[f"processed_features"][modality_name] = crop_func(feature)
+            output_dict[f"processed_features"][modality_name] = feature
 
         """Assemble hetero features"""
         counting_dict = {modality_name: 0 for modality_name in self.modality_name_list}

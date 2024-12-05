@@ -4,17 +4,16 @@
 
 import argparse
 import os
+import platform
 import statistics
 import time
-import platform
 
 import torch
 from tensorboardX import SummaryWriter
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 
 import opencood.hypes_yaml.yaml_utils as yaml_utils
-from opencood.data_utils.datasets.base_datasets.opv2v_dataset import OPV2VDataset
-from opencood.data_utils.datasets.fusion_dataset.inter_hetero_fusion_dataset import InterHeteroFusionDataset
+from opencood.data_utils.datasets import BuildDataset
 from opencood.tools import train_utils
 from opencood.utils.logger import get_logger
 
@@ -120,8 +119,7 @@ def main():
     hypes = yaml_utils.LoadYAML(opt.hypes_yaml, opt)
 
     logger.important("Dataset Building")
-    trainDataset = InterHeteroFusionDataset(hypes, False, True, OPV2VDataset)
-    evalDataset = InterHeteroFusionDataset(hypes, False, False, OPV2VDataset)
+    trainDataset, evalDataset = BuildDataset(hypes), BuildDataset(hypes, train=False)
 
     # trainDataset, evalDataset = Subset(trainDataset, range(0, 100)), Subset(evalDataset, range(0, 100))
 
@@ -153,7 +151,7 @@ def main():
     # if we want to train from last checkpoint.
     lowest_val_loss, lowest_val_epoch = 1e5, -1
     saved_path, init_epoch, lowest_val_epoch, model, scheduler = _LoadModules(opt.model_dir, hypes, model, optimizer)
-
+    logger.add(saved_path)  # 获取到新 `save_path` 后新增加一个输出
     model.to(device)
 
     # record training
@@ -180,7 +178,7 @@ def main():
         _TrainOneEpoch(train_loader, device, epoch, writer, model, optimizer, criterion, single_weight)
 
         if epoch % hypes["train_params"]["save_freq"] == 0:
-            torch.save(model.state_dict(), os.path.join(saved_path, "net_epoch%d.pth" % (epoch + 1)))
+            torch.save(model.state_dict(), os.path.join(saved_path, f"net_epoch{epoch+1}.pth"))
 
         if epoch % hypes["train_params"]["eval_freq"] == 0:
             valid_ave_loss = _EvalOneEpoch(val_loader, device, epoch, writer, model, criterion)

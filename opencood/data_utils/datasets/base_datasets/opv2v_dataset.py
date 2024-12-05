@@ -113,7 +113,7 @@ class OPV2VDataset(Dataset):
 
         # Structure: {scenario_id : {cav_1 : {timestamp1 : {yaml: path,
         # lidar: path, cameras:list of path}}}}
-        self.hdf5 = True  # 使用一下 hdf5
+        self.hdf5 = False  # 使用一下 hdf5
         self.LoadDataPathFun = self._LoadHDF5DataPaths if self.hdf5 else self._Load4DataPaths
         self.scenario_database: List[Dict[str, Dict[str, PFTimestampData | bool | HDF5Data]]] = []
         self.len_record = []

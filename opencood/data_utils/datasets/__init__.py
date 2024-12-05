@@ -1,8 +1,10 @@
+from opencood.data_utils.datasets.base_datasets.opv2v_dataset import OPV2VDataset
 from opencood.data_utils.datasets.basedataset.dairv2x_basedataset import DAIRV2XBaseDataset
 from opencood.data_utils.datasets.basedataset.opv2v_basedataset import OPV2VBaseDataset
 from opencood.data_utils.datasets.basedataset.v2xset_basedataset import V2XSETBaseDataset
 from opencood.data_utils.datasets.basedataset.v2xsim_basedataset import V2XSIMBaseDataset
 from opencood.data_utils.datasets.early_fusion_dataset import getEarlyFusionDataset
+from opencood.data_utils.datasets.fusion_dataset.inter_hetero_dataset import InterHeteroDataset
 from opencood.data_utils.datasets.fusion_dataset.inter_hetero_fusion_dataset import InterHeteroFusionDataset
 from opencood.data_utils.datasets.heter_infer.intermediate_heter_infer_fusion_dataset import (
     getIntermediateheterinferFusionDataset,
@@ -12,7 +14,6 @@ from opencood.data_utils.datasets.intermediate_fusion_dataset import getIntermed
 from opencood.data_utils.datasets.intermediate_heter_fusion_dataset import getIntermediateheterFusionDataset
 from opencood.data_utils.datasets.late_fusion_dataset import getLateFusionDataset
 from opencood.data_utils.datasets.late_heter_fusion_dataset import getLateheterFusionDataset
-from torch.utils.data import Subset
 
 
 def build_dataset(dataset_cfg, visualize=False, train=True):
@@ -37,4 +38,19 @@ def build_dataset(dataset_cfg, visualize=False, train=True):
 
     dataset = fusion_dataset_func(base_dataset_cls)(params=dataset_cfg, visualize=visualize, train=train)
     # dataset = Subset(dataset, range(0, 5000))  # 使用 Subset, 只让一部分数据进行训练
+    return dataset
+
+
+FUSION_DATASETS = {"InterHetero": InterHeteroDataset, "InterHeteroFusion": InterHeteroFusionDataset}
+BASE_DATASETS = {
+    "OPV2V": OPV2VDataset,
+    "V2XSIM": V2XSIMBaseDataset,
+    "DAIRV2X": DAIRV2XBaseDataset,
+    "V2XSET": V2XSETBaseDataset,
+}
+
+
+def BuildDataset(config, visualize=False, train=True):
+    fusion_name, dataset_name = config["fusion"]["core_method"], config["fusion"]["dataset"]
+    dataset = FUSION_DATASETS[fusion_name](config, visualize, train, BASE_DATASETS[dataset_name])
     return dataset
