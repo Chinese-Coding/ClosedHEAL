@@ -1,17 +1,17 @@
 import pytorch_lightning as L
 import torch
-from diffusers import StableDiffusionPipeline
+from diffusers import UNet2DConditionModel, AutoencoderKL, DDIMScheduler
 
 
 class OPV2VDiffusionModel(L.LightningModule):
-    def __init__(self, dataloader, optimizer_hype: dict, model_id="stabilityai/stable-diffusion-2-1"):
+    def __init__(self, optimizer_hype: dict, model_id="stabilityai/stable-diffusion-2-1"):
         super().__init__()
-        pipeline = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16)
-        self.unet = pipeline.unet
-        self.text_encoder = pipeline.text_encoder
-        self.scheduler = pipeline.scheduler
+        # UNet 去噪网络
+        self.unet = UNet2DConditionModel.from_pretrained(model_id, subfolder="unet", ignore_mismatched_sizes=True)
+        self.unet.train()
+        self.vae = AutoencoderKL.from_pretrained(model_id, subfolder="vae", use_safetensors=True)
+        self.scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
 
-        self.dataloder = dataloader
         self.optimizer = self._BuildOptimizer(optimizer_hype)
 
     def _BuildOptimizer(self, hypes):
@@ -24,23 +24,21 @@ class OPV2VDiffusionModel(L.LightningModule):
         else:
             return optimizer_method(self.unet.parameters(), lr=method_dict["lr"])
 
-    def forward(self, noisy_images, timesteps, text_embeddings):
-        return self.unet(noisy_images, timesteps, text_embeddings)
+    def forward(self, noisy_latents, timestep):
+        return self.unet(noisy_latents, timestep)
 
     def training_step(self, batch):
-        imgs = batch["ego"]["inputs_m2"]["imgs"]
-        print(imgs.shape)
-        imgs.to(self.device)
-        noise = torch.randn_like(imgs)
-        timesteps = torch.randint(0, self.scheduler.num_train_timesteps, (imgs.shape[0],), device=self.device)
-        noisy_images = self.scheduler.add_noise(imgs, noise, timesteps)
-
-        noise_pred = self.forward(noisy_images, timesteps)
-        loss = torch.nn.functional.mse_loss(noise_pred, noise)
+        print(f"输入图像的shape为: {batch.shape}")  # 检查一下输入的图像的 shape
+        latents = self.vae.encode(batch).latent_dist.sample() * self.vae.config.scaling_factor
+        print(f"提取到隐空间的 shape 为 {latents.shape}")
+        noise = torch.randn_like(latents)
+        timestep = torch.randint(0, self.scheduler.config.num_train_timesteps, (latents.shape[0],), device=self.device)
+        print(f"生成的时刻为 {timestep.shape}")
+        noisy_latents = self.scheduler.add_noise(latents, noise, timestep)
+        print(f"加噪之后的隐空间的 shape 为 {noisy_latents.shape}")
+        pred_noise = self.forward(noisy_latents, timestep)
+        loss = torch.nn.functional.mse_loss(pred_noise, noise)
         return loss
-
-    def train_dataloader(self):
-        return self.dataloder
 
     def configure_optimizers(self):
         return self.optimizer

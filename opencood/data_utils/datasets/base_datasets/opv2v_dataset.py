@@ -101,8 +101,7 @@ class OPV2VDataset(Dataset):
         # will it follows 'self.generate_object_center' when 'self.generate_object_center' change?
         self.generate_object_center_single = self.GenerateObjectCenter
 
-        # by default, we load lidar, camera and metadata. But users may
-        # define additional inputs/tasks
+        # by default, we load lidar, camera and metadata. But users may define additional inputs/tasks
         self.add_data_extension = params["add_data_extension"] if "add_data_extension" in params else []
 
         self.addNoise = GetNoiseGenerator(params.get("noise_setting", {}))

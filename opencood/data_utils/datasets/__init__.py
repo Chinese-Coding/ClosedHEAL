@@ -4,6 +4,7 @@ from opencood.data_utils.datasets.basedataset.opv2v_basedataset import OPV2VBase
 from opencood.data_utils.datasets.basedataset.v2xset_basedataset import V2XSETBaseDataset
 from opencood.data_utils.datasets.basedataset.v2xsim_basedataset import V2XSIMBaseDataset
 from opencood.data_utils.datasets.early_fusion_dataset import getEarlyFusionDataset
+from opencood.data_utils.datasets.fusion_dataset.diffusion_dataset import DiffusionDataset
 from opencood.data_utils.datasets.fusion_dataset.inter_hetero_dataset import InterHeteroDataset
 from opencood.data_utils.datasets.fusion_dataset.inter_hetero_fusion_dataset import InterHeteroFusionDataset
 from opencood.data_utils.datasets.heter_infer.intermediate_heter_infer_fusion_dataset import (
@@ -41,7 +42,11 @@ def build_dataset(dataset_cfg, visualize=False, train=True):
     return dataset
 
 
-FUSION_DATASETS = {"InterHetero": InterHeteroDataset, "InterHeteroFusion": InterHeteroFusionDataset}
+FUSION_DATASETS = {
+    "InterHetero": InterHeteroDataset,
+    "InterHeteroFusion": InterHeteroFusionDataset,
+    "Diffusion": DiffusionDataset,
+}
 BASE_DATASETS = {
     "OPV2V": OPV2VDataset,
     "V2XSIM": V2XSIMBaseDataset,

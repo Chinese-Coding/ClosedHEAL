@@ -51,30 +51,35 @@ def main():
         drop_last=True,
         prefetch_factor=2,
     )
-    # val_loader = DataLoader(
-    #     evalDataset,
-    #     batch_size=hypes["train_params"]["batch_size"],
-    #     num_workers=2,
-    #     collate_fn=trainDataset.collate_batch_train,  # WARNING: 如果想要全部数据进行训练需要修改这里
-    #     shuffle=True,
-    #     pin_memory=True,  # 这里先改成 False, 先跑起来再说
-    #     drop_last=True,
-    #     prefetch_factor=2,
-    # )
+    val_loader = DataLoader(
+        evalDataset,
+        batch_size=hypes["train_params"]["batch_size"],
+        num_workers=2,
+        collate_fn=trainDataset.collate_batch_train,  # WARNING: 如果想要全部数据进行训练需要修改这里
+        shuffle=True,
+        pin_memory=True,  # 这里先改成 False, 先跑起来再说
+        drop_last=True,
+        prefetch_factor=2,
+    )
 
     logger.important("数据集加载完毕, 开始创建模型")
-    model = OPV2VDiffusionModel(train_loader, hypes)
+    # 当您使用具有 Tensor Cores 的 NVIDIA GPU（例如 RTX 4090）时，PyTorch 提示您可以使用 torch.set_float32_matmul_precision('medium' | 'high') 来充分利用这些硬件特性。
+    # 默认情况下，PyTorch 的矩阵乘法使用标准的 FP32 精度，但这并不能充分发挥 Tensor Cores 的高效特性。
+    # 设置 torch.set_float32_matmul_precision('medium') 或 torch.set_float32_matmul_precision('high') 可以让 PyTorch 使用 TF32 或混合精度的方式在计算矩阵乘法时进行一定程度的精度-性能折中，从而获得更好的训练速度和吞吐量。
+    # 简而言之，您的 GPU 支持更高效的矩阵运算模式，通过这条设置可以在计算图开始前添加类似以下代码，从而提升训练的速度（可能会有非常轻微的精度损失）
+    torch.set_float32_matmul_precision("medium")
+    model = OPV2VDiffusionModel(hypes)
     trainer = L.Trainer(
         accelerator="gpu",  # 指定使用GPU
-        devices=-1,
+        devices=-1,  # 使用全部的 GPU
         max_epochs=hypes["train_params"]["epoches"],
         log_every_n_steps=1,
         check_val_every_n_epoch=1,
         val_check_interval=1,
-        precision=16,
+        precision="16-mixed",
         strategy="ddp",
     )
-    trainer.fit(model)
+    trainer.fit(model, train_loader, val_loader)
 
 
 if __name__ == "__main__":
