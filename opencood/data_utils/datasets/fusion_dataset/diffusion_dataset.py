@@ -12,7 +12,9 @@ class DiffusionDataset(Dataset):
     def __init__(self, params, visualize, train, baseDataset: Type[OPV2VDataset]):
         super().__init__()
         self.baseDataset = baseDataset(params, visualize, train)
-        self.preprocess = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
+        self.preprocess = transforms.Compose(
+            [transforms.Resize(128), transforms.ToTensor(), transforms.Normalize([0.5], [0.5])]
+        )
         self.baseDataset.reinitialize()
 
     def __len__(self):

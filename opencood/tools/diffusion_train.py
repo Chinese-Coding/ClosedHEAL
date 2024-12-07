@@ -68,16 +68,18 @@ def main():
     # 设置 torch.set_float32_matmul_precision('medium') 或 torch.set_float32_matmul_precision('high') 可以让 PyTorch 使用 TF32 或混合精度的方式在计算矩阵乘法时进行一定程度的精度-性能折中，从而获得更好的训练速度和吞吐量。
     # 简而言之，您的 GPU 支持更高效的矩阵运算模式，通过这条设置可以在计算图开始前添加类似以下代码，从而提升训练的速度（可能会有非常轻微的精度损失）
     torch.set_float32_matmul_precision("medium")
+    # 尝试在训练过程中加入torch.autograd.detect_anomaly(True) 检查梯度传播过程
+    torch.autograd.detect_anomaly(True)
     model = OPV2VDiffusionModel(hypes)
     trainer = L.Trainer(
         accelerator="gpu",  # 指定使用GPU
-        devices=-1,  # 使用全部的 GPU
+        devices=[0, 1],  # 使用全部的 GPU
         max_epochs=hypes["train_params"]["epoches"],
         log_every_n_steps=1,
         check_val_every_n_epoch=1,
         val_check_interval=1,
         precision="16-mixed",
-        strategy="ddp",
+        strategy="ddp_find_unused_parameters_true",
     )
     trainer.fit(model, train_loader, val_loader)
 

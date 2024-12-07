@@ -10,7 +10,7 @@ from typing import List, Dict
 import cv2
 import h5py
 import numpy as np
-from torch.utils.data import Dataset
+from PIL import Image
 
 import opencood.utils.pcd_utils as pcd_utils
 from opencood.data_utils.augmentor.data_augmentor import DataAugmentor
@@ -21,7 +21,6 @@ from opencood.data_utils.pre_processor import build_preprocessor
 from opencood.hypes_yaml.yaml_utils import LoadYAML, LoadYAMLFromStr
 from opencood.utils.camera_utils import LoadCameraData
 from opencood.utils.logger import get_logger
-from PIL import Image
 
 logger = get_logger()
 
@@ -69,7 +68,7 @@ def _ReplaceWithAdditional(filePath: str):
     )
 
 
-class OPV2VDataset(Dataset):
+class OPV2VDataset:
     def __init__(self, params, visualize, train=True, hetero=False, adaptor=None):
         super().__init__()
         self.visualize, self.train = visualize, train
