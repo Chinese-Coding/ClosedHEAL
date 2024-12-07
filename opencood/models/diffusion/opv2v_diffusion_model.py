@@ -36,7 +36,7 @@ class OPV2VDiffusionModel(L.LightningModule):
         return self.unet(noisy_latents, timestep, self.null_prompt_embeds.to(self.device)).sample
 
     def training_step(self, batch):
-        print(f"输入图像的shape为: {batch.shape}")  # 检查一下输入的图像的 shape
+        # print(f"输入图像的shape为: {batch.shape}")  # 检查一下输入的图像的 shape
         total_loss = 0
         for one_data in batch:
             with torch.no_grad():
@@ -50,15 +50,14 @@ class OPV2VDiffusionModel(L.LightningModule):
                 # print(f"生成的时刻为 {timestep.shape}")
                 noisy_latents = self.scheduler.add_noise(latents, noise, timestep)
                 # print(f"加噪之后的隐空间的 shape 为 {noisy_latents.shape}")
-            pred_noise = self.forward(noisy_latents, timestep)
-            print(f"预测噪声的 shape 为 {pred_noise.shape}")
+            pred_noise = self.forward(noisy_latents.detach(), timestep)
+            # print(f"预测噪声的 shape 为 {pred_noise.shape}")
+            opt = self.optimizers()
+            opt.zero_grad()
             loss = torch.nn.functional.mse_loss(pred_noise, noise)
-            total_loss += loss  # 累加每个样本的损失
-        opt = self.optimizers()
-        opt.zero_grad()
-        with torch.autograd.detect_anomaly():
-            self.manual_backward(total_loss)
-        opt.step()
+            with torch.autograd.detect_anomaly():
+                self.manual_backward(loss)
+            opt.step()
         # return total_loss.mean()
         # return total_loss / len(batch)  # 返回该批次平均损失（假设要平均处理，也可以有其他处理方式）
 
