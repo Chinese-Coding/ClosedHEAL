@@ -1,14 +1,15 @@
 import argparse
+import gc
 import os
 import platform
 
-import pytorch_lightning as L
 import torch
+from diffusers import UNet2DConditionModel, DDIMScheduler, AutoencoderKL, StableDiffusionPipeline
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.data_utils.datasets import BuildDataset
-from opencood.models.diffusion.opv2v_diffusion_model import OPV2VDiffusionModel
 from opencood.utils.logger import get_logger
 
 logger = get_logger()
@@ -32,7 +33,15 @@ def train_parser():
     return opt
 
 
+def PrintTensorInfo(tensor, name):
+    info = f"Tensor Name: {name}, Device: {tensor.device}, Shape: {tensor.shape}, Dtype: {tensor.dtype}"
+    print(info)
+
+
 def main():
+    torch.set_float32_matmul_precision("medium")
+    torch.autograd.detect_anomaly(True)
+
     _PrintSystemInfo()
     os.system("python opencood/utils/setup.py build_ext --inplace")  # 每次执行前都先编译一下, 以免修改了忘记编译了
     opt = train_parser()
@@ -51,37 +60,40 @@ def main():
         drop_last=True,
         prefetch_factor=2,
     )
-    val_loader = DataLoader(
-        evalDataset,
-        batch_size=hypes["train_params"]["batch_size"],
-        num_workers=2,
-        collate_fn=trainDataset.collate_batch_train,  # WARNING: 如果想要全部数据进行训练需要修改这里
-        shuffle=True,
-        pin_memory=True,  # 这里先改成 False, 先跑起来再说
-        drop_last=True,
-        prefetch_factor=2,
-    )
 
-    logger.important("数据集加载完毕, 开始创建模型")
-    # 当您使用具有 Tensor Cores 的 NVIDIA GPU（例如 RTX 4090）时，PyTorch 提示您可以使用 torch.set_float32_matmul_precision('medium' | 'high') 来充分利用这些硬件特性。
-    # 默认情况下，PyTorch 的矩阵乘法使用标准的 FP32 精度，但这并不能充分发挥 Tensor Cores 的高效特性。
-    # 设置 torch.set_float32_matmul_precision('medium') 或 torch.set_float32_matmul_precision('high') 可以让 PyTorch 使用 TF32 或混合精度的方式在计算矩阵乘法时进行一定程度的精度-性能折中，从而获得更好的训练速度和吞吐量。
-    # 简而言之，您的 GPU 支持更高效的矩阵运算模式，通过这条设置可以在计算图开始前添加类似以下代码，从而提升训练的速度（可能会有非常轻微的精度损失）
-    torch.set_float32_matmul_precision("medium")
-    # 尝试在训练过程中加入torch.autograd.detect_anomaly(True) 检查梯度传播过程
-    torch.autograd.detect_anomaly(True)
-    model = OPV2VDiffusionModel(hypes)
-    trainer = L.Trainer(
-        accelerator="gpu",  # 指定使用GPU
-        devices=[0, 1],  # 使用全部的 GPU
-        max_epochs=hypes["train_params"]["epoches"],
-        log_every_n_steps=1,
-        check_val_every_n_epoch=1,
-        val_check_interval=1,
-        precision="16-mixed",
-        strategy="ddp_find_unused_parameters_true",
+    model_id = "stabilityai/stable-diffusion-2-1"
+    unet = UNet2DConditionModel.from_pretrained(model_id, subfolder="unet", ignore_mismatched_sizes=True)
+    unet.train()  # 使用 unet 的训练模式
+    vae = AutoencoderKL.from_pretrained(model_id, subfolder="vae", use_safetensors=True)
+    scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
+    scheduler.set_timesteps(100)
+    pipeline = StableDiffusionPipeline.from_pretrained(model_id, vae=vae, unet=unet, scheduler=scheduler)
+    null_prompt_embeds, _ = pipeline.encode_prompt(
+        prompt="", device="cpu", num_images_per_prompt=1, do_classifier_free_guidance=False
     )
-    trainer.fit(model, train_loader, val_loader)
+    opt = torch.optim.Adam(unet.parameters(), lr=1e-6)
+    gc.collect()
+
+    device = torch.device("cuda")
+    unet.to(device)
+    vae.to(device)
+    null_prompt_embeds = null_prompt_embeds.cuda()
+
+    for batch in tqdm(train_loader):
+        for one_image in batch:
+            x = torch.unsqueeze(one_image, dim=0)
+            x = x.to(device)
+            latents = vae.encode(x).latent_dist.sample() * vae.config.scaling_factor
+            noise = scheduler.init_noise_sigma * torch.ones_like(latents)
+            for t in scheduler.timesteps:
+                noisy_latents = scheduler.add_noise(latents, noise, t)
+                pred_noise = unet(noisy_latents, t, null_prompt_embeds).sample
+                opt.zero_grad()
+                loss = torch.nn.functional.mse_loss(pred_noise, noise)
+                with torch.autograd.detect_anomaly():
+                    loss.backward()
+                opt.step()
+                noise = scheduler.step(pred_noise, t, noise).prev_sample
 
 
 if __name__ == "__main__":

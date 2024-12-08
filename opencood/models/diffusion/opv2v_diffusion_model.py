@@ -3,14 +3,14 @@ import gc
 import pytorch_lightning as L
 import torch
 from diffusers import UNet2DConditionModel, AutoencoderKL, DDIMScheduler, StableDiffusionPipeline
+from torch import nn
 
 
-class OPV2VDiffusionModel(L.LightningModule):
+class OPV2VDiffusionModel(nn.Module):
     def __init__(self, optimizer_hype: dict, model_id="stabilityai/stable-diffusion-2-1"):
         super().__init__()
-        # UNet 去噪网络
         self.unet = UNet2DConditionModel.from_pretrained(model_id, subfolder="unet", ignore_mismatched_sizes=True)
-        self.unet.train()
+        self.unet.train()  # 使用 unet 的训练模式
         self.vae = AutoencoderKL.from_pretrained(model_id, subfolder="vae", use_safetensors=True)
         self.scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
         pipeline = StableDiffusionPipeline.from_pretrained(model_id, vae=self.vae, unet=self.unet, scheduler=self.scheduler)
@@ -20,7 +20,6 @@ class OPV2VDiffusionModel(L.LightningModule):
         gc.collect()
         self.optimizer = self._BuildOptimizer(optimizer_hype)
         # Important: This property activates manual optimization.
-        self.automatic_optimization = False
 
     def _BuildOptimizer(self, hypes):
         method_dict = hypes["optimizer"]
@@ -31,6 +30,18 @@ class OPV2VDiffusionModel(L.LightningModule):
             return optimizer_method(self.unet.parameters(), lr=method_dict["lr"], **method_dict["args"])
         else:
             return optimizer_method(self.unet.parameters(), lr=method_dict["lr"])
+
+    def forward(self, one_image):
+        x = torch.unsqueeze(one_image, dim=0)
+        latents = self.vae.encode(x).latent_dist.sample() * self.vae.config.scaling_factor
+        noise = torch.randn_like(latents, requires_grad=False)
+        for t in self.scheduler.timesteps[:-1]:
+            noisy_latents = self.scheduler.add_noise(latents, noise, t)
+
+            model_output = self.unet(noise, t)
+            # 使用scheduler更新噪声
+            noise = self.scheduler.step(model_output, t, noise).prev_sample
+        return noise
 
     def forward(self, noisy_latents, timestep):
         return self.unet(noisy_latents, timestep, self.null_prompt_embeds.to(self.device)).sample
