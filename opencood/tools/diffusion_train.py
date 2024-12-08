@@ -40,7 +40,6 @@ def PrintTensorInfo(tensor, name):
 
 def main():
     torch.set_float32_matmul_precision("medium")
-    torch.autograd.detect_anomaly(True)
 
     _PrintSystemInfo()
     os.system("python opencood/utils/setup.py build_ext --inplace")  # 每次执行前都先编译一下, 以免修改了忘记编译了
@@ -60,14 +59,13 @@ def main():
         drop_last=True,
         prefetch_factor=2,
     )
-
     model_id = "stabilityai/stable-diffusion-2-1"
-    unet = UNet2DConditionModel.from_pretrained(model_id, subfolder="unet", ignore_mismatched_sizes=True)
-    unet.train()  # 使用 unet 的训练模式
-    vae = AutoencoderKL.from_pretrained(model_id, subfolder="vae", use_safetensors=True)
-    scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
+    pipeline = StableDiffusionPipeline.from_pretrained(model_id, ignore_mismatched_sizes=True)
+    unet = pipeline.unet
+    unet.train()
+    vae = pipeline.vae
+    scheduler = pipeline.scheduler
     scheduler.set_timesteps(100)
-    pipeline = StableDiffusionPipeline.from_pretrained(model_id, vae=vae, unet=unet, scheduler=scheduler)
     null_prompt_embeds, _ = pipeline.encode_prompt(
         prompt="", device="cpu", num_images_per_prompt=1, do_classifier_free_guidance=False
     )
@@ -90,8 +88,7 @@ def main():
                 pred_noise = unet(noisy_latents, t, null_prompt_embeds).sample
                 opt.zero_grad()
                 loss = torch.nn.functional.mse_loss(pred_noise, noise)
-                with torch.autograd.detect_anomaly():
-                    loss.backward()
+                loss.backward(retain_graph=True)
                 opt.step()
                 noise = scheduler.step(pred_noise, t, noise).prev_sample
 
