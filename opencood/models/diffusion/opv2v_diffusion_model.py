@@ -20,6 +20,7 @@ class OPV2VDiffusionModel(nn.Module):
         gc.collect()
         self.optimizer = self._BuildOptimizer(optimizer_hype)
         # Important: This property activates manual optimization.
+        self.automatic_optimization = False
 
     def _BuildOptimizer(self, hypes):
         method_dict = hypes["optimizer"]
@@ -30,18 +31,6 @@ class OPV2VDiffusionModel(nn.Module):
             return optimizer_method(self.unet.parameters(), lr=method_dict["lr"], **method_dict["args"])
         else:
             return optimizer_method(self.unet.parameters(), lr=method_dict["lr"])
-
-    def forward(self, one_image):
-        x = torch.unsqueeze(one_image, dim=0)
-        latents = self.vae.encode(x).latent_dist.sample() * self.vae.config.scaling_factor
-        noise = torch.randn_like(latents, requires_grad=False)
-        for t in self.scheduler.timesteps[:-1]:
-            noisy_latents = self.scheduler.add_noise(latents, noise, t)
-
-            model_output = self.unet(noise, t)
-            # 使用scheduler更新噪声
-            noise = self.scheduler.step(model_output, t, noise).prev_sample
-        return noise
 
     def forward(self, noisy_latents, timestep):
         return self.unet(noisy_latents, timestep, self.null_prompt_embeds.to(self.device)).sample
@@ -65,12 +54,8 @@ class OPV2VDiffusionModel(nn.Module):
             # print(f"预测噪声的 shape 为 {pred_noise.shape}")
             opt = self.optimizers()
             opt.zero_grad()
-            loss = torch.nn.functional.mse_loss(pred_noise, noise)
-            with torch.autograd.detect_anomaly():
-                self.manual_backward(loss)
+            self.manual_backward(total_loss, retain_graph=True)
             opt.step()
-        # return total_loss.mean()
-        # return total_loss / len(batch)  # 返回该批次平均损失（假设要平均处理，也可以有其他处理方式）
 
     def configure_optimizers(self):
         return self.optimizer

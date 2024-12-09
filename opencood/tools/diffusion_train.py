@@ -4,7 +4,7 @@ import os
 import platform
 
 import torch
-from diffusers import UNet2DConditionModel, DDIMScheduler, AutoencoderKL, StableDiffusionPipeline
+from diffusers import StableDiffusionPipeline
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -88,7 +88,8 @@ def main():
                 pred_noise = unet(noisy_latents, t, null_prompt_embeds).sample
                 opt.zero_grad()
                 loss = torch.nn.functional.mse_loss(pred_noise, noise)
-                loss.backward(retain_graph=True)
+                with torch.autograd.set_detect_anomaly(True):
+                    loss.backward(retain_graph=True)
                 opt.step()
                 noise = scheduler.step(pred_noise, t, noise).prev_sample
 
