@@ -1,6 +1,5 @@
 import gc
 
-import pytorch_lightning as L
 import torch
 from diffusers import UNet2DConditionModel, AutoencoderKL, DDIMScheduler, StableDiffusionPipeline
 from torch import nn

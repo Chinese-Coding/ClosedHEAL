@@ -7,6 +7,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Union, List
 
+import PIL
 import accelerate
 import datasets
 import diffusers
@@ -28,7 +29,6 @@ from tqdm.auto import tqdm
 
 from opencood.data_utils.datasets.base_datasets.opv2v_diffusion_dataset import OPV2VDiffusionDataset
 
-# Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 
 logger = get_logger(__name__, log_level="INFO")
 
@@ -52,79 +52,59 @@ def _extract_into_tensor(arr, timesteps, broadcast_shape):
 
 
 def parse_args():
+    # fmt: off
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
     parser.add_argument(
-        "--model_config_name_or_path",
-        type=str,
-        default=None,
+        "--model_config_name_or_path", type=str, default=None,
         help="The config of the UNet model to train, leave as None to use standard DDPM configuration.",
     )
     parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="ddpm-model-64",
+        "--output_dir", type=str, default="ddpm-model-64",
         help="The output directory where the model predictions and checkpoints will be written.",
     )
+    parser.add_argument("--root_dir", type=str, default="/dataset/OPV2V/train", help="数据集存储位置")
     parser.add_argument("--overwrite_output_dir", action="store_true")
     parser.add_argument(
-        "--cache_dir",
-        type=str,
-        default=None,
+        "--cache_dir", type=str, default=None,
         help="The directory where the downloaded models and datasets will be stored.",
     )
     parser.add_argument(
-        "--resolution",
-        type=int,
-        default=64,
+        "--resolution", type=int, default=64,
+        help="The resolution for input images, all the images in the train/validation dataset will be resized to this resolution",
+    )
+    parser.add_argument(
+        "--center_crop", default=False, action="store_true",
         help=(
-            "The resolution for input images, all the images in the train/validation dataset will be resized to this resolution"
+            "Whether to center crop the input images to the resolution. "
+            "If not set, the images will be randomly cropped. "
+            "The images will be resized to the resolution first before cropping."
         ),
     )
     parser.add_argument(
-        "--center_crop",
-        default=False,
-        action="store_true",
-        help=(
-            "Whether to center crop the input images to the resolution. If not set, the images will be randomly"
-            " cropped. The images will be resized to the resolution first before cropping."
-        ),
-    )
-    parser.add_argument(
-        "--random_flip",
-        default=False,
-        action="store_true",
+        "--random_flip", default=False, action="store_true",
         help="whether to randomly flip images horizontally",
     )
     parser.add_argument("--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader.")
     parser.add_argument("--eval_batch_size", type=int, default=16, help="The number of images to generate for evaluation.")
     parser.add_argument(
-        "--dataloader_num_workers",
-        type=int,
-        default=0,
+        "--dataloader_num_workers", type=int, default=0,
         help="The number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process.",
     )
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--save_images_epochs", type=int, default=10, help="How often to save images during training.")
     parser.add_argument("--save_model_epochs", type=int, default=10, help="How often to save the model during training.")
     parser.add_argument(
-        "--gradient_accumulation_steps",
-        type=int,
-        default=1,
-        help="Number of updates steps to accumulate before performing a backward/update pass.",
+        "--gradient_accumulation_steps", type=int, default=1,
+        help="Number of updates steps to accumulate before performing a backward/update pass."
     )
     parser.add_argument(
-        "--learning_rate",
-        type=float,
-        default=1e-4,
-        help="Initial learning rate (after the potential warmup period) to use.",
+        "--learning_rate", type=float, default=1e-4, help="Initial learning rate (after the potential warmup period) to use."
     )
     parser.add_argument(
-        "--lr_scheduler",
-        type=str,
-        default="cosine",
+        "--lr_scheduler", type=str, default="cosine",
         help=(
-            'The scheduler type to use. Choose between ["linear", "cosine", "cosine_with_restarts", "polynomial",'
-            ' "constant", "constant_with_warmup"]'
+            "The scheduler type to use. Choose between "
+            '["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"]'
         ),
     )
     parser.add_argument("--lr_warmup_steps", type=int, default=500, help="Number of steps for the warmup in the lr scheduler.")
@@ -133,9 +113,7 @@ def parse_args():
     parser.add_argument("--adam_weight_decay", type=float, default=1e-6, help="Weight decay magnitude for the Adam optimizer.")
     parser.add_argument("--adam_epsilon", type=float, default=1e-08, help="Epsilon value for the Adam optimizer.")
     parser.add_argument(
-        "--use_ema",
-        action="store_true",
-        help="Whether to use Exponential Moving Average for the final model weights.",
+        "--use_ema", action="store_true", help="Whether to use Exponential Moving Average for the final model weights."
     )
     parser.add_argument("--ema_inv_gamma", type=float, default=1.0, help="The inverse gamma value for the EMA decay.")
     parser.add_argument("--ema_power", type=float, default=3 / 4, help="The power value for the EMA decay.")
@@ -143,72 +121,50 @@ def parse_args():
     parser.add_argument("--push_to_hub", action="store_true", help="Whether or not to push the model to the Hub.")
     parser.add_argument("--hub_token", type=str, default=None, help="The token to use to push to the Model Hub.")
     parser.add_argument(
-        "--hub_model_id",
-        type=str,
-        default=None,
-        help="The name of the repository to keep in sync with the local `output_dir`.",
+        "--hub_model_id", type=str, default=None, help="The name of the repository to keep in sync with the local `output_dir`."
     )
     parser.add_argument("--hub_private_repo", action="store_true", help="Whether or not to create a private repository.")
     parser.add_argument(
-        "--logger",
-        type=str,
-        default="tensorboard",
-        choices=["tensorboard", "wandb"],
+        "--logger", type=str, default="tensorboard", choices=["tensorboard", "wandb"],
         help=(
             "Whether to use [tensorboard](https://www.tensorflow.org/tensorboard) or [wandb](https://www.wandb.ai)"
             " for experiment tracking and logging of model metrics and model checkpoints"
         ),
     )
     parser.add_argument(
-        "--logging_dir",
-        type=str,
-        default="logs",
+        "--logging_dir", type=str, default="logs",
         help=(
-            "[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. Will default to"
-            " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."
+            "[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. "
+            "Will default to *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."
         ),
     )
     parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
     parser.add_argument(
-        "--mixed_precision",
-        type=str,
-        default="no",
-        choices=["no", "fp16", "bf16"],
+        "--mixed_precision", type=str, default="no", choices=["no", "fp16", "bf16"],
         help=(
-            "Whether to use mixed precision. Choose"
-            "between fp16 and bf16 (bfloat16). Bf16 requires PyTorch >= 1.10."
-            "and an Nvidia Ampere GPU."
+            "Whether to use mixed precision. Choose between fp16 and bf16 (bfloat16). "
+            "Bf16 requires PyTorch >= 1.10. and an Nvidia Ampere GPU."
         ),
     )
     parser.add_argument(
-        "--prediction_type",
-        type=str,
-        default="epsilon",
-        choices=["epsilon", "sample"],
+        "--prediction_type", type=str, default="epsilon", choices=["epsilon", "sample"],
         help="Whether the model should predict the 'epsilon'/noise error or directly the reconstructed image 'x0'.",
     )
     parser.add_argument("--ddpm_num_steps", type=int, default=1000)
     parser.add_argument("--ddpm_num_inference_steps", type=int, default=1000)
     parser.add_argument("--ddpm_beta_schedule", type=str, default="linear")
     parser.add_argument(
-        "--checkpointing_steps",
-        type=int,
-        default=500,
+        "--checkpointing_steps", type=int, default=500,
         help=(
-            "Save a checkpoint of the training state every X updates. These checkpoints are only suitable for resuming"
-            " training using `--resume_from_checkpoint`."
+            "Save a checkpoint of the training state every X updates. "
+            "These checkpoints are only suitable for resuming training using `--resume_from_checkpoint`."
         ),
     )
     parser.add_argument(
-        "--checkpoints_total_limit",
-        type=int,
-        default=None,
-        help="Max number of checkpoints to store.",
+        "--checkpoints_total_limit", type=int, default=None, help="Max number of checkpoints to store."
     )
     parser.add_argument(
-        "--resume_from_checkpoint",
-        type=str,
-        default=None,
+        "--resume_from_checkpoint", type=str, default=None,
         help=(
             "Whether training should be resumed from a previous checkpoint. Use a path saved by"
             ' `--checkpointing_steps`, or `"latest"` to automatically select the last available checkpoint.'
@@ -224,6 +180,24 @@ def parse_args():
         args.local_rank = env_local_rank
 
     return args
+    # fmt: on
+
+
+def _DeleteCheckpoint(output_dir, checkpoints_total_limit):
+    checkpoints = os.listdir(output_dir)
+    checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
+    checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
+
+    if len(checkpoints) >= checkpoints_total_limit:
+        num_to_remove = len(checkpoints) - checkpoints_total_limit + 1
+        removing_checkpoints = checkpoints[0:num_to_remove]
+
+        logger.info(f"{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints")
+        logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
+
+        for removing_checkpoint in removing_checkpoints:
+            removing_checkpoint = os.path.join(output_dir, removing_checkpoint)
+            shutil.rmtree(removing_checkpoint)
 
 
 def main(args):
@@ -233,7 +207,7 @@ def main(args):
     kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=7200))  # a big number for high resolution or big dataset
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        mixed_precision=args.mixed_precision,
+        mixed_precision=args.mixed_precision,  # 原来 `accelerate` 所提示的 `mixed_precision` 在这里设置了
         log_with=args.logger,
         project_config=accelerator_project_config,
         kwargs_handlers=[kwargs],
@@ -312,22 +286,8 @@ def main(args):
             out_channels=3,
             layers_per_block=2,
             block_out_channels=(128, 128, 256, 256, 512, 512),
-            down_block_types=(
-                "DownBlock2D",
-                "DownBlock2D",
-                "DownBlock2D",
-                "DownBlock2D",
-                "AttnDownBlock2D",
-                "DownBlock2D",
-            ),
-            up_block_types=(
-                "UpBlock2D",
-                "AttnUpBlock2D",
-                "UpBlock2D",
-                "UpBlock2D",
-                "UpBlock2D",
-                "UpBlock2D",
-            ),
+            down_block_types=("DownBlock2D", "DownBlock2D", "DownBlock2D", "DownBlock2D", "AttnDownBlock2D", "DownBlock2D"),
+            up_block_types=("UpBlock2D", "AttnUpBlock2D", "UpBlock2D", "UpBlock2D", "UpBlock2D", "UpBlock2D"),
         )
     else:
         config = UNet2DModel.load_config(args.model_config_name_or_path)
@@ -360,9 +320,9 @@ def main(args):
             xformers_version = version.parse(xformers.__version__)
             if xformers_version == version.parse("0.0.16"):
                 logger.warning(
-                    "xFormers 0.0.16 cannot be used for training in some GPUs. If you observe problems during training, please"
-                    " update xFormers to at least 0.0.17. See"
-                    " https://huggingface.co/docs/diffusers/main/en/optimization/xformers for more details."
+                    "xFormers 0.0.16 cannot be used for training in some GPUs. "
+                    "If you observe problems during training, please update xFormers to at least 0.0.17. "
+                    "See https://huggingface.co/docs/diffusers/main/en/optimization/xformers for more details."
                 )
             model.enable_xformers_memory_efficient_attention()
         else:
@@ -372,9 +332,7 @@ def main(args):
     accepts_prediction_type = "prediction_type" in set(inspect.signature(DDPMScheduler.__init__).parameters.keys())
     if accepts_prediction_type:
         noise_scheduler = DDPMScheduler(
-            num_train_timesteps=args.ddpm_num_steps,
-            beta_schedule=args.ddpm_beta_schedule,
-            prediction_type=args.prediction_type,
+            num_train_timesteps=args.ddpm_num_steps, beta_schedule=args.ddpm_beta_schedule, prediction_type=args.prediction_type
         )
     else:
         noise_scheduler = DDPMScheduler(num_train_timesteps=args.ddpm_num_steps, beta_schedule=args.ddpm_beta_schedule)
@@ -388,9 +346,6 @@ def main(args):
         eps=args.adam_epsilon,
     )
 
-    # Get the datasets: you can either provide your own training and evaluation files (see below)
-    # or specify a Dataset from the hub (the dataset will be downloaded automatically from the datasets Hub).
-
     # Preprocessing the datasets and DataLoaders creation.
     augmentations = transforms.Compose([
         transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
@@ -400,14 +355,14 @@ def main(args):
         transforms.Normalize([0.5], [0.5]),
     ])
 
-    def transform_images(examples: Union[List]) -> Union[List[torch.Tensor], torch.Tensor]:
+    def transform_images(examples: Union[List[PIL.Image.Image], PIL.Image.Image]) -> Union[List[torch.Tensor], torch.Tensor]:
         if isinstance(examples, list):
             images = [augmentations(image.convert("RGB")) for image in examples]
-        else:
+        elif isinstance(examples, PIL.Image.Image):
             images = augmentations(examples.convert("RGB"))
         return images
 
-    dataset = OPV2VDiffusionDataset("/dataset/OPV2V/train")
+    dataset = OPV2VDiffusionDataset(args.root_dir)
     logger.info(f"Dataset size: {len(dataset)}")
 
     dataset.set_transform(transform_images)
@@ -429,8 +384,8 @@ def main(args):
     if args.use_ema:
         ema_model.to(accelerator.device)
 
-    # We need to initialize the trackers we use, and also store our configuration.
-    # The trackers initializes automatically on the main process.
+    # We need to initialize the trackers we use, and also store our configuration. 我们需要初始化我们使用的跟踪器，并存储您的配置
+    # The trackers initializes automatically on the main process. 跟踪器在主进程上自动初始化
     if accelerator.is_main_process:
         run = os.path.split(__file__)[-1].split(".")[0]
         accelerator.init_trackers(run)
@@ -473,7 +428,7 @@ def main(args):
             first_epoch = global_step // num_update_steps_per_epoch
             resume_step = resume_global_step % (num_update_steps_per_epoch * args.gradient_accumulation_steps)
 
-    # Train!
+    # Train! 真正开始训练的代码, 其余的代码都是初始化之类的东西, 很繁琐
     for epoch in range(first_epoch, args.num_epochs):
         model.train()
         progress_bar = tqdm(total=num_update_steps_per_epoch, disable=not accelerator.is_local_main_process)
@@ -530,24 +485,7 @@ def main(args):
                     if global_step % args.checkpointing_steps == 0:
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
                         if args.checkpoints_total_limit is not None:
-                            checkpoints = os.listdir(args.output_dir)
-                            checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
-                            checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
-
-                            # before we save the new checkpoint, we need to have at _most_ `checkpoints_total_limit - 1` checkpoints
-                            if len(checkpoints) >= args.checkpoints_total_limit:
-                                num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
-                                removing_checkpoints = checkpoints[0:num_to_remove]
-
-                                logger.info(
-                                    f"{len(checkpoints)} checkpoints already exist, removing"
-                                    f" {len(removing_checkpoints)} checkpoints"
-                                )
-                                logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
-
-                                for removing_checkpoint in removing_checkpoints:
-                                    removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
-                                    shutil.rmtree(removing_checkpoint)
+                            _DeleteCheckpoint(args.output_dir, args.checkpoints_total_limit)
 
                         save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                         accelerator.save_state(save_path)
@@ -571,11 +509,8 @@ def main(args):
                     ema_model.store(unet.parameters())
                     ema_model.copy_to(unet.parameters())
 
-                pipeline = DDPMPipeline(
-                    unet=unet,
-                    scheduler=noise_scheduler,
-                )
-
+                pipeline = DDPMPipeline(unet=unet, scheduler=noise_scheduler)
+                # 通过 torch.Generator() 创建一个固定种子的随机数生成器，以确保结果可复现
                 generator = torch.Generator(device=pipeline.device).manual_seed(0)
                 # run pipeline in inference (sample random noise and denoise)
                 images = pipeline(
@@ -589,6 +524,7 @@ def main(args):
                     ema_model.restore(unet.parameters())
 
                 # denormalize the images and save to tensorboard
+                # 将生成的图像从 [-1, 1] 的范围反标准化到 [0, 255]，并转换为 uint8 类型，以便保存或记录
                 images_processed = (images * 255).round().astype("uint8")
 
                 if args.logger == "tensorboard":
@@ -612,10 +548,7 @@ def main(args):
                     ema_model.store(unet.parameters())
                     ema_model.copy_to(unet.parameters())
 
-                pipeline = DDPMPipeline(
-                    unet=unet,
-                    scheduler=noise_scheduler,
-                )
+                pipeline = DDPMPipeline(unet=unet, scheduler=noise_scheduler)
 
                 pipeline.save_pretrained(args.output_dir)
 
