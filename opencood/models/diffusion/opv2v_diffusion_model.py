@@ -47,7 +47,7 @@ class OPV2VDiffusionModel(nn.Module):
                 # 这里针对每一张照片只生成一个随机的噪声
                 timestep = torch.randint(0, self.scheduler.config.num_train_timesteps, (latents.shape[0],), device=self.device)
                 # print(f"生成的时刻为 {timestep.shape}")
-                noisy_latents = self.scheduler.add_noise(latents, noise, timestep)
+                noisy_latents = self.scheduler.get_timestamp(latents, noise, timestep)
                 # print(f"加噪之后的隐空间的 shape 为 {noisy_latents.shape}")
             pred_noise = self.forward(noisy_latents.detach(), timestep)
             # print(f"预测噪声的 shape 为 {pred_noise.shape}")

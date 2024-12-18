@@ -49,7 +49,7 @@ class HeterModelBaseline(nn.Module):
             self.sensor_type_dict[modality_name] = sensor_name
 
             # import model
-            encoder_filename = "opencood.models.heter_encoders"
+            encoder_filename = "opencood.checkpoints.heter_encoders"
             encoder_lib = importlib.import_module(encoder_filename)
             encoder_class = None
             target_model_name = model_setting["core_method"].replace("_", "")
@@ -229,13 +229,11 @@ class HeterModelBaseline(nn.Module):
             cls_preds_before_fusion = self.cls_head_single(heter_feature_2d)
             reg_preds_before_fusion = self.reg_head_single(heter_feature_2d)
             dir_preds_before_fusion = self.dir_head_single(heter_feature_2d)
-            output_dict.update(
-                {
-                    "cls_preds_single": cls_preds_before_fusion,
-                    "reg_preds_single": reg_preds_before_fusion,
-                    "dir_preds_single": dir_preds_before_fusion,
-                }
-            )
+            output_dict.update({
+                "cls_preds_single": cls_preds_before_fusion,
+                "reg_preds_single": reg_preds_before_fusion,
+                "dir_preds_single": dir_preds_before_fusion,
+            })
 
         """
         Feature Fusion (multiscale).

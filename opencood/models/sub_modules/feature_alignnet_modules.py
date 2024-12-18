@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# from timm.models.layers import DropPath # 放到服务器上出现的错误, 适应新版本
+# from timm.checkpoints.layers import DropPath # 放到服务器上出现的错误, 适应新版本
 from timm.layers import DropPath
 
 from opencood.models.sub_modules.cbam import BasicBlock

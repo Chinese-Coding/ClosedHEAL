@@ -27,7 +27,7 @@ class HeterModelLate(nn.Module):
             self.sensor_type_dict[modality_name] = sensor_name
 
             # import model
-            encoder_filename = "opencood.models.heter_encoders"
+            encoder_filename = "opencood.checkpoints.heter_encoders"
             encoder_lib = importlib.import_module(encoder_filename)
             encoder_class = None
             target_model_name = model_setting["core_method"].replace("_", "")

@@ -191,7 +191,7 @@ model:
         layer_strides: [ 2 ]
         num_filters: [ 64 ]
 
-      aligner_args: # see opencood/models/sub_modules/feature_alignnet.py
+      aligner_args: # see opencood/checkpoints/sub_modules/feature_alignnet.py
         core_method: identity
 
     m2: # detailed model setting for m2 agent type

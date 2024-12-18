@@ -1,7 +1,3 @@
-# -*- coding: utf-8 -*-
-# Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
-# License: TDG-Attribution-NonCommercial-NoDistrib
-
 import os
 from pathlib import Path
 from typing import List, Dict, Union
@@ -156,6 +152,28 @@ class StableDiffusionDataset(Dataset):
             "camera": torch.stack(camera_data),
             "lidar": torch.stack(lidar_np),
         }
+
+
+class OPV2VDiffusionDataset(Dataset):
+    def __init__(self, root_dir: str):
+        print(f"从 {root_dir} 中加载数据")
+        self.img_path = sorted(file for file in Path(root_dir).rglob("*.png"))
+        print(f"共加载 {len(self.img_path)} 张图片")
+
+    def SetTransform(self, transform):
+        self.transform = transform
+
+    def reinitialize(self):
+        pass
+
+    def __len__(self):
+        return len(self.img_path)
+
+    def __getitem__(self, idx) -> torch.Tensor:
+        return self.transform(Image.open(self.img_path[idx]).copy())
+
+    def collate_fn(self, imgs: List[Image]) -> torch.Tensor:
+        return torch.stack(imgs)
 
 
 if __name__ == "__main__":

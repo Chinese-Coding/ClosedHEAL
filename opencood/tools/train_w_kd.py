@@ -101,7 +101,7 @@ def main():
         teacher_checkpoint_path = hypes["kd_flag"]["teacher_path"]
 
         # import the model
-        model_filename = "opencood.models." + teacher_model_name
+        model_filename = "opencood.checkpoints." + teacher_model_name
         model_lib = importlib.import_module(model_filename)
         teacher_model_class = None
         target_model_name = teacher_model_name.replace("_", "")
@@ -199,7 +199,10 @@ def main():
     run_test = True
     if run_test:
         fusion_method = opt.fusion_method
-        cmd = f"python /GPFS/rhome/yifanlu/workspace/OpenCOODv2/opencood/tools/inference.py --model_dir {saved_path} --fusion_method {fusion_method}"
+        cmd = (
+            "python /GPFS/rhome/yifanlu/workspace/OpenCOODv2/opencood/tools/inference.py --model_dir"
+            f" {saved_path} --fusion_method {fusion_method}"
+        )
         print(f"Running command: {cmd}")
         os.system(cmd)
 

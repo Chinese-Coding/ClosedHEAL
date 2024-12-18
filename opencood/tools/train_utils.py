@@ -14,7 +14,7 @@ import torch.optim as optim
 import yaml
 
 
-def backup_script(full_path, folders_to_save=["models", "data_utils", "utils", "loss"]):
+def backup_script(full_path, folders_to_save=["checkpoints", "data_utils", "utils", "loss"]):
     target_folder = os.path.join(full_path, "scripts")
     if not os.path.exists(target_folder):
         if not os.path.exists(target_folder):
@@ -144,7 +144,7 @@ def setup_train(hypes):
 
 def create_model(hypes):
     """
-    Import the module "models/[model_name].py
+    Import the module "checkpoints/[model_name].py
 
     Parameters
     __________
@@ -159,7 +159,7 @@ def create_model(hypes):
     backbone_name = hypes["model"]["core_method"]
     backbone_config = hypes["model"]["args"]
 
-    model_filename = "opencood.models." + backbone_name
+    model_filename = "opencood.checkpoints." + backbone_name
     model_lib = importlib.import_module(model_filename)
     model = None
     target_model_name = backbone_name.replace("_", "")
@@ -170,7 +170,7 @@ def create_model(hypes):
 
     if model is None:
         print(
-            "backbone not found in models folder. Please make sure you "
+            "backbone not found in checkpoints folder. Please make sure you "
             "have a python file named %s and has a class "
             "called %s ignoring upper/lower case" % (model_filename, target_model_name)
         )

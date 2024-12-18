@@ -84,7 +84,7 @@ def main():
             latents = vae.encode(x).latent_dist.sample() * vae.config.scaling_factor
             noise = scheduler.init_noise_sigma * torch.ones_like(latents)
             for t in scheduler.timesteps:
-                noisy_latents = scheduler.add_noise(latents, noise, t)
+                noisy_latents = scheduler.get_timestamp(latents, noise, t)
                 pred_noise = unet(noisy_latents, t, null_prompt_embeds).sample
                 opt.zero_grad()
                 loss = torch.nn.functional.mse_loss(pred_noise, noise)

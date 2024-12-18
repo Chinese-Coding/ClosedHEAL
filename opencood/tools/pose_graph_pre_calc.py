@@ -102,7 +102,7 @@ def main():
         stage1_checkpoint_path = hypes["box_align_pre_calc"]["stage1_model_path"]
 
         # import the model
-        model_filename = "opencood.models." + stage1_model_name
+        model_filename = "opencood.checkpoints." + stage1_model_name
         model_lib = importlib.import_module(model_filename)
         stage1_model_class = None
         target_model_name = stage1_model_name.replace("_", "")

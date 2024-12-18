@@ -66,7 +66,7 @@ def parse_args():
     parser.add_argument("--overwrite_output_dir", action="store_true")
     parser.add_argument(
         "--cache_dir", type=str, default=None,
-        help="The directory where the downloaded models and datasets will be stored.",
+        help="The directory where the downloaded checkpoints and datasets will be stored.",
     )
     parser.add_argument(
         "--resolution", type=int, default=64,
@@ -243,7 +243,7 @@ def main(args):
                 del load_model
 
             for i in range(len(models)):
-                # pop models so that they are not loaded again
+                # pop checkpoints so that they are not loaded again
                 model = models.pop()
 
                 # load diffusers style into model
@@ -449,7 +449,7 @@ def main(args):
 
             # Add noise to the clean images according to the noise magnitude at each timestep
             # (this is the forward diffusion process)
-            noisy_images = noise_scheduler.add_noise(clean_images, noise, timesteps)
+            noisy_images = noise_scheduler.get_timestamp(clean_images, noise, timesteps)
 
             with accelerator.accumulate(model):
                 # Predict the noise residual
