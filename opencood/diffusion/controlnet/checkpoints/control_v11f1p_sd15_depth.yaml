@@ -48,6 +48,7 @@ model:
         num_heads: 8
         use_spatial_transformer: True
         transformer_depth: 1
+        # TODO: 这个参数好像和输入的图像个数有关, 目前先按照 batch_size = 1, img_num = 4 来设置
         context_dim: 768
         use_checkpoint: True
         legacy: False

@@ -72,10 +72,7 @@ class TimestepBlock(nn.Module):
 
 
 class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
-    """
-    A sequential module that passes timestep embeddings to the children that
-    support it as an extra input.
-    """
+    """A sequential module that passes timestep embeddings to the children that support it as an extra input."""
 
     def forward(self, x, emb, context=None):
         for layer in self:

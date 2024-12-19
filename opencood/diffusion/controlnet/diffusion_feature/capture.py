@@ -41,6 +41,12 @@ class Capture:
             self.load_model()
             self.prepare()
 
+    def get_tlist(self):
+        t = random.randint(0, 1000)
+        index = round((1000 - t) / (1000 / self.steps))
+        t = int((self.steps - index) * (1000 / self.steps))
+        return torch.tensor([t]).to(self.device)
+
     def load_model(self):
         yaml_path = f"{self.basic_dir}/{self.yaml}"
         stable_diffusion_path = f"{self.basic_dir}/{self.stable_diffusion_ckpt}"

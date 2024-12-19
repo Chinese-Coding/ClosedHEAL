@@ -10,16 +10,13 @@ class ImageProcessor(nn.Module):
     def forward(self, image):
         latent = self.capturer.model.encode_first_stage(image)
         latent = self.capturer.model.get_first_stage_encoding(latent).detach()
-        cond = {"c_crossattn": [self.capturer.model.get_learned_conditioning(["" + ", " + self.capturer.a_prompt])]}
-        cond_txt = torch.cat(cond["c_crossattn"], 1).to(self.capturer.device)
-        t = torch.randint(0, 1000, (latent.shape[0],), device=self.capturer.device).long()
+        # TODO: 感觉这里可能有问题
+        tlist = self.capturer.get_tlist()
         noise = torch.randn_like(latent)
-        noise_latent = self.capturer.model.q_sample(latent, t, noise)
+        noise_latent = self.capturer.model.q_sample(latent, tlist, noise)
         pred_noise, inter_features = self.capturer.model.model.diffusion_model(
             x=noise_latent,
-            timesteps=t,
-            context=cond_txt,
-            control=None,
+            timesteps=tlist,
             only_mid_control=self.capturer.only_mid_control,
             per_layers=True,
         )
