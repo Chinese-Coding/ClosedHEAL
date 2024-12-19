@@ -238,7 +238,6 @@ class BasicTransformerBlock(nn.Module):
             query_dim=dim, heads=n_heads, dim_head=d_head, dropout=dropout,
             context_dim=context_dim if self.disable_self_attn else None,
         )  # fmt:on
-
         # is self-attn if context is none
         self.attn2 = attn_cls(query_dim=dim, heads=n_heads, dim_head=d_head, dropout=dropout, context_dim=context_dim)
         self.ff = FeedForward(dim, dropout=dropout, glu=gated_ff)
@@ -251,13 +250,9 @@ class BasicTransformerBlock(nn.Module):
         return checkpoint(self._forward, (x, context), self.parameters(), self.checkpoint)
 
     def _forward(self, x, context=None):
-        print(x.shape)
         x = self.attn1(self.norm1(x), context=context if self.disable_self_attn else None) + x
-        print(x.shape)
         x = self.attn2(self.norm2(x), context=context) + x
-        print(x.shape)
         x = self.ff(self.norm3(x)) + x
-        print(x.shape)
         return x
 
 
