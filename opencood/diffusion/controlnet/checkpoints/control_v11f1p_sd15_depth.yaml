@@ -34,6 +34,8 @@ model:
         context_dim: 768
         use_checkpoint: True
         legacy: False
+        # 新增配置项
+        use_fp16: True
 
     unet_config:
       target: cldm.cldm.ControlledUnetModel
@@ -48,10 +50,11 @@ model:
         num_heads: 8
         use_spatial_transformer: True
         transformer_depth: 1
-        # TODO: 这个参数好像和输入的图像个数有关, 目前先按照 batch_size = 1, img_num = 4 来设置
         context_dim: 768
         use_checkpoint: True
         legacy: False
+        # 新增配置项
+        use_fp16: True
 
     first_stage_config:
       target: ldm.models.autoencoder.AutoencoderKL

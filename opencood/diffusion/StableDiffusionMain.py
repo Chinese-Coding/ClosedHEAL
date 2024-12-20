@@ -2,14 +2,17 @@ import argparse
 from typing import Union, List
 
 import PIL
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
 
-from opencood.diffusion.StableDiffusionDataset import StableDiffusionDataset, OPV2VDiffusionDataset
+from opencood.diffusion.Converter import Converter
+from opencood.diffusion.StableDiffusionDataset import StableDiffusionDataset
 from opencood.diffusion.controlnet.diffusion_feature.capture import Capture
-from opencood.diffusion.controlnet.diffusion_feature.image_processor import ImageProcessor
+from opencood.diffusion.controlnet.diffusion_feature.dpt_processor import DPTProcessor
+from opencood.diffusion.controlnet.diffusion_feature.img_processor import ImageProcessor
 
 
 def parse_args():
@@ -46,33 +49,57 @@ if __name__ == "__main__":
     data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=1, collate_fn=dataset.collate_fn)
 
     # Image 部分
-    image_capture = Capture(device=torch.device("cuda:0"))
-    image_processor = ImageProcessor(image_capture)
-    image_optimizer = torch.optim.AdamW(
-        image_processor.capturer.model.parameters(), lr=1e-4, betas=(0.95, 0.999), weight_decay=1e-6, eps=1e-08
+    img_capture = Capture(device=torch.device("cuda:0"))
+    img_processor = ImageProcessor(img_capture)
+    img_optimizer = torch.optim.AdamW(
+        img_processor.capturer.model.parameters(), lr=1e-4, betas=(0.95, 0.999), weight_decay=1e-6, eps=1e-08
     )
-    image_lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(image_optimizer, args.epoch, eta_min=1e-6)
+    img_lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(img_optimizer, args.epoch, eta_min=1e-6)
+
+    # lidar 部分
+    dpt_capture = Capture(device=torch.device("cuda:1"))
+    projector = Converter()
+    dpt_processor = DPTProcessor(dpt_capture)
+    dpt_optimizer = torch.optim.AdamW(
+        dpt_processor.capturer.model.parameters(), lr=1e-4, betas=(0.95, 0.999), weight_decay=1e-6, eps=1e-08
+    )
+    dpt_lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(dpt_optimizer, args.epoch, eta_min=1e-6)
 
     for i in range(args.epoch):
         progress_bar = tqdm(total=len(data_loader))
         progress_bar.set_description(f"Epoch {i}")
         for batch in data_loader:
-            camera = batch["camera"]
             # 输入到模型的图片总数是: batch_size * 4
-            # 取 4 张图片里面的一张图片输入就没有问题, 但是一次性输入 4 张图片就有问题了
+            camera = batch["camera"]
             batch_size, num_cameras, channels, height, width = camera.shape  # num_cameras 恒定为 4, channels 恒定为 3
-            camera = camera.view(-1, channels, height, width)
-            noise, pred_noise = image_processor(camera.to(image_capture.device))
+            img = camera.view(-1, channels, height, width)
+            img_noise, img_pred_noise = img_processor(img.to(img_capture.device))
 
-            # noise, pred_noise = image_processor(camera[0].unsqueeze(0).to(image_capture.device))
-            # noise, pred_noise = image_processor(batch.to(image_capture.device))
-            loss = torch.nn.functional.mse_loss(noise, pred_noise)
-            image_optimizer.zero_grad()
-            loss.backward()
-            image_optimizer.step()
-            image_lr_scheduler.step()
+            # lidar 部分
+            lidar = batch["lidar"]
+            dpt = projector.proj_pc2dpt(
+                lidar, extrinsic=np.eye(4), intrinsic=np.eye(3), h=height, w=width
+            )
+            _, dpt = dpt_processor.process_given_dpt(dpt)
+            dpt_noise, dpt_pred_noise = dpt_processor(dpt.to(dpt_capture.device))
+
+            img_loss = torch.nn.functional.mse_loss(img_noise, img_pred_noise)
+            dpt_loss = torch.nn.functional.mse_loss(dpt_noise, dpt_pred_noise)
+
+            img_optimizer.zero_grad()
+            img_loss.backward()
+            img_optimizer.step()
+            img_lr_scheduler.step()
+
+            dpt_optimizer.zero_grad()
+            dpt_loss.backward()
+            dpt_optimizer.step()
+            dpt_lr_scheduler.step()
 
             progress_bar.update(1)
-            logs = {"loss": loss.detach().item(), "lr": image_lr_scheduler.get_last_lr()[0]}
+            logs = {
+                "img_loss": img_loss.detach().item(), "img_lr": img_lr_scheduler.get_last_lr()[0],
+                "dpt_loss": dpt_loss.detach().item(), "dpt_lr": dpt_lr_scheduler.get_last_lr()[0],
+            }
             progress_bar.set_postfix(**logs)
         progress_bar.close()

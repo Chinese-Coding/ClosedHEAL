@@ -107,7 +107,7 @@ class DDIMSampler:
         # sampling
         C, H, W = shape
         size = (batch_size, C, H, W)
-        print(f"Data shape for DDIM sampling is {size}, eta {eta}")
+        print(f"Data shape for DDIM sampling is {size}, eta {eta}, need_noise")
 
         samples, intermediates = self.ddim_sampling(
             conditioning,
@@ -154,24 +154,28 @@ class DDIMSampler:
         dynamic_threshold=None,
         ucg_schedule=None,
     ):
+        """
+        ddim_sampling 通过迭代反向扩散步骤，将随机噪声逐步转化为图像。在每一步，使用模型预测去噪值，并结合噪声生成下一步的图像
+        """
         device = self.model.betas.device
         b = shape[0]
-        if x_T is None:
-            img = torch.randn(shape, device=device)
-        else:
-            img = x_T
+        # 如果传入了 x_T，则直接使用它作为初始图像, 否则，使用随机噪声生成一个图像
+        img = torch.randn(shape, device=device) if x_T is None else x_T
 
         if timesteps is None:
+            # 如果 ddim_use_original_steps 为 True, 则使用原始扩散模型的时间步; 否则, 使用 DDIM 自己的时间步调度
             timesteps = self.ddpm_num_timesteps if ddim_use_original_steps else self.ddim_timesteps
         elif timesteps is not None and not ddim_use_original_steps:
             subset_end = int(min(timesteps / self.ddim_timesteps.shape[0], 1) * self.ddim_timesteps.shape[0]) - 1
             timesteps = self.ddim_timesteps[:subset_end]
-
-        intermediates = {"step": [1000], "x_inter": [img], "pred_x0": [img]}
+        # 创建一个字典 intermediates 来保存采样过程中每一步的中间结果，包括当前的图像 (x_inter) 和每一步的预测图像 (pred_x0)
+        intermediates = {"step": [1000], "x_inter": [img], "pred_x0": [img], "noise":[torch.randn_like(img)]}
+        # 在 DDIM 中，采样是逆向的，即从 t=0 到 t=T 进行反向扩散。因此，使用 np.flip(timesteps) 来反转时间步，从而按照逆向顺序进行采样。
         time_range = reversed(range(0, timesteps)) if ddim_use_original_steps else np.flip(timesteps)
         total_steps = timesteps if ddim_use_original_steps else timesteps.shape[0]
         print(f"Running DDIM Sampling with {total_steps} timesteps")
 
+        # 迭代反向扩散过程
         iterator = tqdm(time_range, desc="DDIM Sampler", total=total_steps)
         for i, step in enumerate(iterator):
             index = total_steps - i - 1
@@ -200,8 +204,9 @@ class DDIMSampler:
                 unconditional_guidance_scale=unconditional_guidance_scale,
                 unconditional_conditioning=unconditional_conditioning,
                 dynamic_threshold=dynamic_threshold,
+                need_noise=True
             )
-            img, pred_x0 = outs
+            img, pred_x0, noise = outs # 获取当前步骤的图像和预测的x0
             if callback:
                 callback(i)
             if img_callback:
@@ -211,8 +216,8 @@ class DDIMSampler:
                 intermediates["step"].append(step)
                 intermediates["x_inter"].append(img)
                 intermediates["pred_x0"].append(pred_x0)
-
-        return img, intermediates
+                intermediates["noise"].append(noise)
+        return img, intermediates # 最终，返回生成的图像 img 和采样过程中每个时间步的中间结果 intermediates
 
     @torch.no_grad()
     def p_sample_ddim(
@@ -231,6 +236,7 @@ class DDIMSampler:
         unconditional_guidance_scale=1.0,
         unconditional_conditioning=None,
         dynamic_threshold=None,
+        need_noise=False,
     ):
         b, *_, device = *x.shape, x.device
 
@@ -280,7 +286,10 @@ class DDIMSampler:
         if noise_dropout > 0.0:
             noise = torch.nn.functional.dropout(noise, p=noise_dropout)
         x_prev = a_prev.sqrt() * pred_x0 + dir_xt + noise
-        return x_prev, pred_x0
+        if need_noise:
+            return x_prev, noise
+        else:
+            return x_prev, pred_x0
 
     @torch.no_grad()
     def encode(

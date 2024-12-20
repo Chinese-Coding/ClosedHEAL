@@ -143,38 +143,15 @@ class StableDiffusionDataset(Dataset):
         return len(self.flattened_database)
 
     def collate_fn(self, batches: List[CAVData]) -> Dict[str, Tensor]:
-        camera_data, lidar_np = [], []  # type: List[Tensor], List[Tensor]
+        camera_data, lidar_np = [], []  # type: List[Tensor], List[np.ndarray]
         for batch in batches:
             camera_data.append(torch.stack(self.transform(batch.camera_data)))
-            lidar_np.append(torch.tensor(batch.lidar_np))
+            lidar_np.append(batch.lidar_np)
         return {
             # camera shape: (batch, 4, 3, W, H), 这个 4 是每个车有四个相机
             "camera": torch.stack(camera_data),
-            "lidar": torch.stack(lidar_np),
+            "lidar": lidar_np
         }
-
-
-class OPV2VDiffusionDataset(Dataset):
-    def __init__(self, root_dir: str):
-        print(f"从 {root_dir} 中加载数据")
-        self.img_path = sorted(file for file in Path(root_dir).rglob("*.png"))
-        print(f"共加载 {len(self.img_path)} 张图片")
-
-    def SetTransform(self, transform):
-        self.transform = transform
-
-    def reinitialize(self):
-        pass
-
-    def __len__(self):
-        return len(self.img_path)
-
-    def __getitem__(self, idx) -> torch.Tensor:
-        return self.transform(Image.open(self.img_path[idx]).copy())
-
-    def collate_fn(self, imgs: List[Image]) -> torch.Tensor:
-        return torch.stack(imgs)
-
 
 if __name__ == "__main__":
     from torch.utils.data import DataLoader
