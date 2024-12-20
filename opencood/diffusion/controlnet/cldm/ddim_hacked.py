@@ -287,7 +287,7 @@ class DDIMSampler:
             noise = torch.nn.functional.dropout(noise, p=noise_dropout)
         x_prev = a_prev.sqrt() * pred_x0 + dir_xt + noise
         if need_noise:
-            return x_prev, noise
+            return x_prev, pred_x0, noise
         else:
             return x_prev, pred_x0
 

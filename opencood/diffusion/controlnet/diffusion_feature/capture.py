@@ -40,6 +40,9 @@ class Capture:
         if load_model:
             self.load_model()
             self.prepare()
+        # input parses
+        self.img_resolution = 512
+        self.dpt_resolution = 512
 
     def get_tlist(self):
         t = random.randint(0, 1000)
@@ -70,6 +73,8 @@ class Capture:
         self.model.control_model.to(self.device)
         self.model.first_stage_model.to(self.device)
         self.model.cond_stage_model.to(self.device)
+        # TODO: 这里直接改一个类的内部属性总感觉是不很合适, 但是目前没有更好的解决办法了. 里面的函数一层套一层, 根本没加这个 device 参数的好地方
+        self.model.cond_stage_model.device = self.device
         self.control_scales = (
             [self.strength * (0.825 ** float(12 - i)) for i in range(13)] if self.guess_mode else ([self.strength] * 13)
         )

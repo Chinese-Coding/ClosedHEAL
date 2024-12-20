@@ -11,7 +11,7 @@ import numpy as np
 import open3d as o3d
 
 
-def pcd_to_np(pcd_file: str):
+def pcd_to_np(pcd_file: str, need_color=True):
     """
     Read  pcd and return numpy array.
 
@@ -26,6 +26,8 @@ def pcd_to_np(pcd_file: str):
     pcd = o3d.io.read_point_cloud(pcd_file)
 
     xyz = np.asarray(pcd.points)
+    if not need_color:
+        return xyz
     # we save the intensity in the first channel
     intensity = np.expand_dims(np.asarray(pcd.colors)[:, 0], -1)
     pcd_np = np.hstack((xyz, intensity))

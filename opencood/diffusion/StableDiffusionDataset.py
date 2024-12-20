@@ -137,7 +137,7 @@ class StableDiffusionDataset(Dataset):
         :return: The dictionary contains loaded yaml params and lidar data for each cav.
         """
         pathes = self.flattened_database[idx]
-        return CAVData(camera_data=LoadCameraData(pathes.cameras), lidar_np=pcd_to_np(pathes.lidar))
+        return CAVData(camera_data=LoadCameraData(pathes.cameras), lidar_np=pcd_to_np(pathes.lidar, need_color=False))
 
     def __len__(self):
         return len(self.flattened_database)

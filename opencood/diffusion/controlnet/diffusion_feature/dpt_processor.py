@@ -1,5 +1,6 @@
 from copy import deepcopy
 
+import einops
 import numpy as np
 import torch
 from torch import nn
@@ -28,6 +29,13 @@ class DPTProcessor(nn.Module):
         super().__init__()
         self.capturer = capturer
         self.ddim_sampler = DDIMSampler(self.capturer.model)
+
+    def control_input(self, dpt):
+        dpt = torch.from_numpy(dpt.copy()).float() / 255.0
+        dpt = torch.stack([dpt for _ in range(1)], dim=0)  # 有意思, 为了增加一个维度直接用一个 None 不就行了吗
+        dpt = einops.rearrange(dpt, "b h w c -> b c h w").clone()
+        dpt = dpt.to(self.capturer.device)
+        return dpt
 
     def process_given_dpt(self, dpt_backup):
         dpt = deepcopy(dpt_backup)
@@ -77,7 +85,7 @@ class DPTProcessor(nn.Module):
         x_inter, noise = intermediates["x_inter"], intermediates["noise"]
         # the t-th iteration TODO: 论文中说迭代 t 次, 实际上具体实现时则把全部的都计算出来, 然后取 t
         tlist = self.capturer.get_tlist()
-        t = tlist[0]
+        t = int(tlist[0])
         index = round((1000 - t) / (1000 / self.capturer.steps))
         render = x_inter[index]  # 使成为
         add_noise = noise[index]
@@ -86,11 +94,11 @@ class DPTProcessor(nn.Module):
 
         control_model = self.capturer.model.control_model
         diffusion_model = self.capturer.model.model.diffusion_model
-        control = control_model(x=render, hint=torch.cat(cond["c_concat"], 1), timesteps=self.capturer.tlist, context=cond_txt)
+        control = control_model(x=render, hint=torch.cat(cond["c_concat"], 1), timesteps=tlist, context=cond_txt)
         control = [c * scale for c, scale in zip(control, self.capturer.control_scales)]
         pred_noise, inter_feats = diffusion_model(
             x=render,  # 这里应该就是输入的噪声
-            timesteps=self.capturer.tlist,
+            timesteps=tlist,
             context=cond_txt,
             control=control,
             only_mid_control=self.capturer.only_mid_control,

@@ -87,10 +87,10 @@ class Converter:
     def to_harmonic(self, input: np.ndarray):
         """转换成齐次坐标形式"""
         M = input.shape[0]
-        input = np.concatenate([input, np.ones[[M, 1]]], axis=1)
+        input = np.concatenate([input, np.ones([M, 1])], axis=1)
         return input
 
-    def proj_3to2(self, xyz: np.ndarray, extrinsic, intrinsic):
+    def proj_3to2(self, xyz: np.ndarray, intrinsic, extrinsic):
         """
         不懂原理, 直接照抄
         :param xyz: shape: [M, 3]

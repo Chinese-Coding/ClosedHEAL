@@ -35,7 +35,7 @@ model:
         use_checkpoint: True
         legacy: False
         # 新增配置项
-        use_fp16: True
+        # use_fp16: True
 
     unet_config:
       target: cldm.cldm.ControlledUnetModel
@@ -54,7 +54,7 @@ model:
         use_checkpoint: True
         legacy: False
         # 新增配置项
-        use_fp16: True
+        # use_fp16: True
 
     first_stage_config:
       target: ldm.models.autoencoder.AutoencoderKL
