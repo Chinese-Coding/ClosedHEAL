@@ -25,6 +25,9 @@ class ControlledUnetModel(UNetModel):
         t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False)
         emb = self.time_embed(t_emb)
         h = x.type(self.dtype)
+        print(f"input blocks: {self.input_blocks}")
+        print(f"middle block: {self.middle_block}")
+        print(f"output blocks: {self.output_blocks}")
         for module in self.input_blocks:
             h = module(h, emb, context)
             hs.append(h)

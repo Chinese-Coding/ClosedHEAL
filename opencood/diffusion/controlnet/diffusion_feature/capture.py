@@ -45,6 +45,9 @@ class Capture:
         self.dpt_resolution = 512
 
     def get_tlist(self):
+        """
+        随即生成一个时刻, 将其转换成对应的 Tensor 后返回
+        """
         t = random.randint(0, 1000)
         index = round((1000 - t) / (1000 / self.steps))
         t = int((self.steps - index) * (1000 / self.steps))

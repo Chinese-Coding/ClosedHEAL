@@ -77,6 +77,7 @@ if __name__ == "__main__":
             # 输入到模型的图片总数是: batch_size * 4
             camera = batch["camera"]
             batch_size, num_cameras, channels, height, width = camera.shape  # num_cameras 恒定为 4, channels 恒定为 3
+            print(f"camera 的 shape: {camera.shape}")
             img = camera.view(-1, channels, height, width)
             img_noise, img_pred_noise = img_processor(img.to(img_capture.device))
 
@@ -85,9 +86,11 @@ if __name__ == "__main__":
             assert isinstance(lidar, list) and len(lidar) == 1
             lidar = lidar[0]
             # TODO: 咱们的点云是 4 维的, 参考项目的是三维的, 没法直接用啊
+            # TODO: 投影方式需要改变一下
             dpt = projector.proj_pc2dpt(
                 lidar, extrinsic=np.eye(4), intrinsic=np.eye(3), h=height, w=width
             )
+            print(type(dpt))
             _, dpt = dpt_processor.process_given_dpt(dpt)
             dpt = (dpt * 1000.0).astype(np.uint16) # 别问, 问就是拿过来的. (最开始他是扩大 1000 倍之后存入磁盘中, 然后需要的时候再读取出来)
             dpt = dpt_processor.control_input(dpt)

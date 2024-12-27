@@ -87,10 +87,9 @@ class DPTProcessor(nn.Module):
         tlist = self.capturer.get_tlist()
         t = int(tlist[0])
         index = round((1000 - t) / (1000 / self.capturer.steps))
-        render = x_inter[index]  # 使成为
+        render = x_inter[index]
         add_noise = noise[index]
         # TODO: step: 151, 论文中说取 150 时刻的预测噪声输出, 这里 151, 就ushi把 151 加的噪声输入到 U-Net 进行去噪, 然后就得到在噪声 150 时刻的特征了
-        x_samples = self.capturer.model.decode_first_stage(x_inter[-1])
 
         control_model = self.capturer.model.control_model
         diffusion_model = self.capturer.model.model.diffusion_model
